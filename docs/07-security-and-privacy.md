@@ -54,6 +54,10 @@ Redaction applies to:
 - transcripts
 - tool outputs
 - error messages
+- memory entries
+
+Secret detection is best-effort. Inspect/delete controls are the backstop; the
+product must not promise perfect secret filtering.
 
 ## Shell Policy
 
@@ -79,6 +83,28 @@ Default decisions:
 | privileged | ask with explicit warning | deny |
 | unknown | ask | deny |
 
+## Windows Tier-1 Policy
+
+Windows is a first-class platform. Shell and filesystem policy must be explicit
+for both Windows and POSIX.
+
+Windows requirements:
+
+- classify PowerShell, `cmd.exe`, and direct executable invocations separately
+- normalize drive-letter, UNC, symlink, junction, and long-path forms
+- treat registry writes as privileged local effects
+- detect destructive PowerShell commands such as `Remove-Item -Recurse`
+- avoid string-built shell commands for filesystem operations
+- prefer native Rust filesystem APIs for tool operations
+- test path escapes with `..`, drive roots, UNC paths, junctions, and symlinks
+
+POSIX requirements:
+
+- normalize symlinks before write/delete decisions
+- detect destructive shell patterns such as `rm -rf`
+- treat privilege escalation commands as privileged
+- distinguish workspace-local writes from external writes
+
 ## Network Policy
 
 The core app may call configured model providers. Tools need separate approval
@@ -90,6 +116,22 @@ Provider clients must:
 - redact auth headers in logs
 - expose request IDs when providers return them
 - avoid logging raw prompts by default
+
+## Quota Wait/Resume Safety
+
+Automatic quota wait/resume is allowed only when it honors the provider's
+documented retry contract and the user's explicit policy.
+
+Safety gates:
+
+- resume only at harness step boundaries
+- never resume while a destructive approval is pending
+- never resume after user cancellation
+- never resume with unrelated dirty workspace state
+- re-probe the provider after the timer instead of trusting local wall-clock time
+- use bounded backoff with jitter when reset metadata is approximate
+- record pause/resume reasons in local state
+- do not present the feature as bypassing or outsmarting limits
 
 ## Telemetry
 
@@ -129,4 +171,3 @@ Unshackled is a coding tool. It should not ship prompts or affordances aimed at:
 
 The permission engine is a local safety layer, not a replacement for provider
 usage policies.
-

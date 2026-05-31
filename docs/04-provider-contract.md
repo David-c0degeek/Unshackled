@@ -15,6 +15,7 @@ Every provider must declare:
 - supported input blocks
 - supported output events
 - supported tool-call shape
+- supported reasoning/thinking shape
 - max context tokens if known
 - auth requirements
 - rate-limit behavior if known
@@ -82,18 +83,29 @@ Provider-specific options must be namespaced.
 ```rust
 pub enum ModelEvent {
     TextDelta(String),
+    ReasoningDelta(String),
     ToolCall { id: String, name: String, input_json: Value },
+    Usage { input_tokens: u64, output_tokens: u64 },
+    ProviderWarning { message: String },
     Done,
 }
 ```
 
+Provider adapters may emit `ReasoningDelta` only when the provider exposes
+reasoning/thinking content through an official API surface. The UI can render
+these events in the optional thinking panel; the core loop must treat them as
+metadata, not user-visible final answer text.
+
+Reasoning blocks needed for provider continuity are persisted in message content
+and replayed on the next request. Adapters that require a reasoning signature or
+provider metadata must round-trip it through `ContentBlock::Reasoning`; display
+events alone are not enough for tool-use loops on those models.
+
 Future events:
 
 - reasoning summary
-- usage update
 - refusal
 - structured output delta
-- provider warning
 
 ## Error Taxonomy
 
@@ -112,6 +124,35 @@ Providers return errors classified as:
 The UI should show concise messages. Debug logs may include request IDs but must
 not log secrets.
 
+## Provider Differences
+
+The provider-neutral layer will leak unless differences are explicit. Each
+provider implementation must document:
+
+- whether parallel tool calls are supported
+- whether partial JSON tool arguments stream incrementally
+- whether reasoning/thinking blocks are available
+- whether usage arrives during streaming or only at completion
+- whether tools can be disabled per request
+- how quota/rate-limit reset metadata is surfaced
+- whether no-tool models need a different prompt path
+
+The session runtime should branch on provider capabilities, not provider names.
+
+## Quota Semantics
+
+Quota wait/resume honors provider contracts. A provider adapter may expose:
+
+- `retry_after`
+- `reset_at`
+- `limit_kind`
+- `retryable`
+- `raw_provider_code`
+
+When a provider gives no machine-readable reset time, Unshackled should use
+bounded backoff with jitter and re-probe before resuming. It must not frame this
+as bypassing limits or retry against a provider's documented policy.
+
 ## Provider Tests
 
 Provider tests must not require real credentials by default.
@@ -121,6 +162,8 @@ Required:
 - request translation tests
 - stream parsing tests
 - error classification tests
+- quota/reset metadata tests
+- provider capability tests
 - redaction tests
 
 Optional:

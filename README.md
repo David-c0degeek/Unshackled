@@ -50,6 +50,8 @@ docs/
   08-testing.md
   09-release-plan.md
   10-decisions.md
+  11-implementation-checklist.md
+  12-feature-specs.md
 ```
 
 ## Build
@@ -84,4 +86,3 @@ unshackled harness status
 
 No autonomous file editing is required for Milestone 1. That keeps the first
 release small, auditable, and legally clean.
-

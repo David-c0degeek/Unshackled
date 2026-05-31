@@ -15,6 +15,10 @@ Session Runtime
   +-- Provider Runtime
   +-- Store
   +-- Permission Engine
+  +-- Recovery Engine
+  +-- Memory Engine
+  +-- Skills Engine
+  +-- Quota Scheduler
 ```
 
 The runtime owns conversation flow. The provider runtime owns model calls. The
@@ -82,6 +86,14 @@ Owns:
 
 Provider implementations must live behind the same trait.
 
+Provider implementations also expose quota metadata when available:
+
+- current limit class
+- reset time
+- retry-after duration
+- whether automatic resume is safe
+- provider-visible error code/category
+
 ### `unshackled-tools`
 
 Owns:
@@ -118,6 +130,10 @@ Owns:
 The harness may call tools through interfaces. It must not bypass permission
 checks.
 
+The harness coordinates with the quota scheduler. If a step pauses due to a
+provider quota window, the current committed state and plan remain authoritative;
+the scheduler only resumes the next safe turn.
+
 ### `unshackled-tui`
 
 Owns:
@@ -127,6 +143,8 @@ Owns:
 - keyboard input
 - approval dialogs
 - status lines
+- footer stats
+- optional thinking/reasoning panel
 
 Recommended crates:
 
@@ -143,8 +161,56 @@ Owns:
 - file-backed cache
 - attempt logs
 - redaction before persistence
+- local memory store files
+- skill manifests
+- quota wait records
 
 Storage must be inspectable plain files where possible.
+
+### Future `unshackled-memory`
+
+Owns:
+
+- local project memory store
+- optional entity/relation extraction after the flat store proves useful
+- retrieval ranking
+- opt-out and deletion controls
+
+Memory must be local-only by design.
+
+### Future `unshackled-skills`
+
+Owns:
+
+- skill discovery
+- skill execution metadata
+- skill suggestion heuristics
+- generated skill drafts
+- skill permission manifests
+
+Auto-generated skills are suggestions until the user reviews and accepts them.
+
+### Future `unshackled-recovery`
+
+Owns:
+
+- bad-output detection
+- repeated-token loop detection
+- stream abort/retry ladder
+- provider degradation state
+- recovery diagnostics
+
+Recovery must prefer stopping safely over continuing with corrupted context.
+
+### Future `unshackled-quota`
+
+Owns:
+
+- provider quota window tracking
+- reset timers
+- wait/resume scheduling
+- unattended-resume policy checks
+- persistence of paused harness runs
 
 ### `unshackled-sandbox`
 
@@ -182,10 +248,11 @@ MCP is post-MVP.
 2. Runtime builds provider-neutral messages.
 3. Tool registry exposes allowed tool schemas.
 4. Provider streams response events.
-5. Tool calls are routed through permission checks.
-6. Tool results are appended to the conversation.
-7. Loop continues until provider emits final answer.
-8. Store persists transcript.
+5. Recovery engine watches for bad-output patterns.
+6. Tool calls are routed through permission checks.
+7. Tool results are appended to the conversation.
+8. Loop continues until provider emits final answer.
+9. Store persists transcript.
 
 ### Harness Resume
 
@@ -196,11 +263,12 @@ MCP is post-MVP.
 5. Select next incomplete step.
 6. Build worker prompt from the step and current state.
 7. Run agent loop with tools.
-8. Run post-step rules.
-9. Run tests if configured.
-10. Commit if rules pass.
-11. Mark step done and commit progress update.
-12. Stop or continue based on mode.
+8. Pause if provider quota requires waiting.
+9. Run post-step rules.
+10. Run tests if configured.
+11. Commit if rules pass.
+12. Mark step done and commit progress update.
+13. Stop, continue, or schedule quota-reset resume based on mode.
 
 ## Data Model
 
@@ -213,6 +281,9 @@ Messages are provider-neutral:
 - metadata
 
 Provider adapters translate messages to the provider's official API format.
+Reasoning/thinking blocks that a provider requires for continuity are stored as
+message content, including signatures or provider metadata when needed, so the
+next request can replay them through the adapter.
 
 ### Tool Calls
 
@@ -272,4 +343,3 @@ Log levels:
 - `info`: major lifecycle events
 - `debug`: payload metadata, never raw secrets
 - `trace`: local-only deep diagnostics
-

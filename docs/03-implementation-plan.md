@@ -134,6 +134,8 @@ Tasks:
 
 - write original Unshackled intake prompt
 - write original Unshackled planner prompt
+- create prompt fixtures and snapshot tests
+- iterate prompts against golden tasks
 - implement `harness intake`
 - implement `harness plan`
 - persist intake transcript
@@ -147,6 +149,7 @@ Done when:
 - idea -> `brief.md` works
 - `brief.md` -> `PROGRESS.md` works
 - invalid model output is retried with validation feedback
+- prompt changes are reviewed through snapshot diffs and eval scores
 
 ## Phase 7: Rule Engine
 
@@ -186,14 +189,42 @@ Tasks:
 - log attempt failures
 - discard failed attempts within workspace
 - replan after capped failures
+- implement context compaction before overflow
+- implement worker-loop trace events
+- run golden-task evals
 
 Done when:
 
 - a sample repo can complete a small task end to end
 - one commit is created per completed step
 - repeated failures trigger context reset and replan
+- golden-task eval suite exists and reports task success rate
+- compaction preserves the current step contract
 
-## Phase 9: Terminal UI
+## Phase 9: Bad-Output Recovery
+
+Goal: detect and recover from degraded model/backend states.
+
+Tasks:
+
+- define `ModelHealth` and `RecoveryAction`
+- detect empty responses
+- detect repeated-token loops
+- detect slash floods such as `/////////`
+- detect malformed tool calls
+- detect malformed structured output
+- implement stream abort/retry ladder
+- reduce risky context on retry (images, tool-result clutter, oversized history)
+- persist recovery diagnostics
+- expose degraded status to CLI/TUI
+
+Done when:
+
+- fake providers can trigger each bad-output class
+- recovery never marks a harness step complete after a bad output
+- exhausted recovery produces a clear user-visible status
+
+## Phase 10: Terminal UI
 
 Goal: usable interactive experience.
 
@@ -203,18 +234,93 @@ Tasks:
 - implement prompt input
 - implement streaming response rendering
 - implement tool approval dialogs
+- implement always-visible footer stats
+- implement optional thinking/reasoning side panel
 - implement status line
 - implement slash commands
 - implement model/provider picker
 - implement transcript search
+- implement responsive collapse for narrow terminals
 
 Done when:
 
 - user can chat, approve tools, and run harness commands inside the TUI
 - screen rendering is tested with snapshots
 - no text overlap in common terminal sizes
+- footer stats remain visible during streaming and tool execution
 
-## Phase 10: MCP and Extensions
+## Phase 11: Skills
+
+Goal: support local skills and user-approved skill generation.
+
+Tasks:
+
+- define Unshackled skill manifest
+- load local project skills
+- load local user skills
+- expose skill instructions to the agent
+- support skill assets/scripts with permission declarations
+- add skill validation
+- add usage-pattern tracking for suggestions
+- generate skill drafts from repeated workflows
+- require user review before enabling generated skills
+
+Done when:
+
+- a checked-in local skill can guide an agent turn
+- generated skills are saved as disabled drafts
+- skill permissions are visible before execution
+
+## Phase 12: Local Memory Store
+
+Goal: retain useful project context locally without hidden sync.
+
+Tasks:
+
+- define local memory file format
+- implement flat project memory store
+- defer graph/entity extraction until the flat store proves useful
+- implement retrieval for relevant memories
+- implement visible memory inspect/delete commands
+- implement project-level opt-out
+- implement explicit consent for global memory
+- add redaction before memory writes
+
+Done when:
+
+- project memories are inspectable local files
+- memory retrieval improves future turns without remote storage
+- users can disable and delete memory cleanly
+
+## Phase 13: Quota Wait/Resume
+
+Goal: pause and resume long-running work across provider quota reset windows.
+
+Tasks:
+
+- classify provider quota/rate-limit errors
+- parse `retry-after` and provider reset metadata when available
+- estimate reset windows when provider only returns prose
+- persist paused run state
+- implement `unshackled harness wait-resume`
+- implement per-run auto-resume flag
+- implement global unattended-resume setting
+- resume only at harness step boundaries
+- block unattended resume when user approval is pending
+- re-probe provider after reset timer before continuing
+- add backoff with jitter for approximate reset windows
+- show reset timer in footer/status
+- add tests with fake quota windows
+
+Done when:
+
+- a fake provider quota error pauses a harness run
+- the run resumes after the reset timer in tests
+- global unattended resume requires explicit config
+- permission gates still stop unsafe actions
+- quota resume honors provider retry metadata and does not bypass policy
+
+## Phase 14: MCP and Extensions
 
 Goal: integrate external tools without weakening safety.
 
@@ -232,7 +338,7 @@ Done when:
 - MCP tools behave like builtin tools from the model's perspective
 - permissions apply uniformly
 
-## Phase 11: Release Hardening
+## Phase 15: Release Hardening
 
 Goal: ship a public alpha.
 
@@ -252,4 +358,3 @@ Done when:
 - fresh install works on supported platforms
 - no prohibited framing or private endpoint remains
 - release artifact includes licenses
-

@@ -24,6 +24,34 @@ Required for:
 - harness resume with fake provider
 - permission prompts with scripted decisions
 - session persistence
+- cancellation during streaming/tool execution
+
+### Golden-Task Evals
+
+The worker loop needs an eval suite before post-MVP features are built. Unit
+tests prove contracts; evals prove the agent actually completes work.
+
+Golden tasks should be small, deterministic repositories with expected outcomes:
+
+- create a tiny CLI
+- add a parser branch
+- fix a failing test
+- edit docs and code together
+- recover from a bad tool result
+- pause/resume after a fake quota window
+
+Each task records:
+
+- success/failure
+- number of model turns
+- tool calls
+- retries/recoveries
+- token usage
+- final git diff
+- test output
+
+The eval provider can be fake at first, then optional live-provider runs can be
+added behind credentials. The scorecard should be tracked over time.
 
 ### Snapshot Tests
 
@@ -34,6 +62,8 @@ Useful for:
 - TUI render output
 - `brief.md` rendering
 - `PROGRESS.md` rendering
+- generated prompts
+- worker loop event traces
 
 ### Live Tests
 
@@ -79,7 +109,9 @@ Allowed fixtures:
 - tool schema translates correctly
 - streaming text parses correctly
 - streaming tool call parses correctly
+- reasoning/thinking events parse correctly
 - malformed stream returns typed error
+- quota reset metadata is classified correctly
 
 ### Tools
 
@@ -104,6 +136,23 @@ Allowed fixtures:
 - rule retry path
 - rule discard path
 - replan cap
+- golden-task smoke scenario
+- quota pause/resume at a step boundary
+
+### Recovery
+
+- slash flood outside code is detected
+- slash-like content inside fenced code is not detected
+- repeated-token loop is detected only after a threshold
+- malformed tool calls trigger recovery
+- exhausted recovery cannot complete a harness step
+
+### Context
+
+- compaction preserves tool-result pairing
+- compaction preserves current step contract
+- memory injection respects token caps
+- stale memory is not injected when relevance is below threshold
 
 ### Store
 
@@ -134,4 +183,3 @@ Optional:
 cargo audit
 cargo deny check
 ```
-

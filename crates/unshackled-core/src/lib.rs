@@ -27,6 +27,11 @@ pub enum ContentBlock {
     Text {
         text: String,
     },
+    Reasoning {
+        text: String,
+        signature: Option<String>,
+        provider_metadata: Option<serde_json::Value>,
+    },
     ToolUse {
         id: String,
         name: String,

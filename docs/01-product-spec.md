@@ -95,6 +95,46 @@ When a step repeatedly fails:
 This is the anti-sunk-cost behavior: do not let the same failing context keep
 digging.
 
+### Job 5: Recover from Bad Model Status
+
+When a provider or local model enters a visibly bad state, Unshackled should
+detect it and recover without corrupting the session.
+
+Examples:
+
+- empty responses
+- repeated-token loops
+- slash floods such as `/////////`
+- malformed tool calls
+- malformed structured output
+- repeated provider-side transient errors
+
+Recovery should be conservative: stop the bad stream, save a diagnostic event,
+retry with reduced risk, and surface the degraded state when automatic recovery
+is exhausted.
+
+### Job 6: Preserve Useful Local Context
+
+Unshackled should help the user retain useful project knowledge locally:
+
+- project facts
+- recurring workflows
+- durable decisions
+- generated skills
+- frequent errors and fixes
+
+Memory is local-only. Project memory may be enabled by default with visible
+controls. Global/personal memory requires explicit consent.
+
+### Job 7: Continue After Provider Quota Resets
+
+Some hosted providers expose session, message, token, or time-window limits.
+Unshackled should understand quota reset windows and optionally resume a paused
+harness run when the provider becomes usable again.
+
+This must be configurable per run and globally. Global unattended resume is
+allowed only when the user explicitly enables it.
+
 ## Modes
 
 ### Interactive REPL
@@ -106,6 +146,8 @@ An always-on terminal session with:
 - slash commands
 - progress display
 - model switching
+- always-visible footer stats
+- optional thinking/reasoning side panel
 
 ### Harness CLI
 
@@ -117,6 +159,7 @@ Scriptable commands:
 - `unshackled harness resume`
 - `unshackled harness status`
 - `unshackled harness feature`
+- `unshackled harness wait-resume`
 
 ### Print Mode
 
@@ -124,6 +167,16 @@ Single prompt in, answer out:
 
 - no workspace mutation unless explicitly enabled
 - useful for shell pipelines
+
+### Continuous Development Mode
+
+Optional mode for long-running harness work:
+
+- pauses cleanly on provider quota/rate limits
+- records the reset timer
+- resumes automatically when allowed by policy
+- never bypasses permission policy
+- never continues after destructive pending approvals without user consent
 
 ## User-Facing Files
 
@@ -148,6 +201,9 @@ Ignored runtime state:
 - cache
 - provider metadata
 - tool-output snapshots
+- local memory store/index
+- generated skill drafts
+- quota wait/resume records
 
 ## Minimum Viable Product
 
@@ -175,4 +231,6 @@ MVP does not need:
 - plugin marketplace
 - IDE integration
 - complex terminal rendering
-
+- global memory
+- automatic skill generation
+- unattended quota-reset resume
