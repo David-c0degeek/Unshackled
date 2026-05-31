@@ -1,0 +1,9 @@
+/target/
+/.unshackled/
+/.harness/
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+
