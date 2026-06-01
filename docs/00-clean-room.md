@@ -37,6 +37,28 @@ The following inputs are acceptable:
 - user-authored requirements
 - conventional CLI and TUI patterns
 
+## Local Behavior Reference
+
+A local working implementation may be used as a read-only behavior reference
+while planning and implementing this Rust project. Its purpose is to clarify
+expected workflows, command behavior, configuration shape, user-facing edge
+cases, and high-level product requirements when this repository's own docs are
+incomplete.
+
+Using that reference does not relax the hard rules above. Contributors must not
+copy, translate, port, mechanically transform, or derive tests, prompts, private
+endpoint behavior, identifiers, UI copy, branding, or implementation structure
+from the reference. Rust implementations must be independently designed
+from this repository's specs, public documentation, and original requirements.
+
+When a change was informed by a local behavior reference, record the observed
+behavior at a high level in the PR provenance note, for example:
+
+```text
+Behavior cross-checked against a local read-only behavior reference.
+Implementation, prompts, tests, and API details are original to this repository.
+```
+
 ## Clean-Room Roles
 
 For any feature inspired by an existing product category:
