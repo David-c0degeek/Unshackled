@@ -153,11 +153,14 @@ Owns:
 - footer stats
 - optional thinking/reasoning panel
 
-Recommended crates:
+UI stack (chosen; see ADR-0006):
 
-- `ratatui`
-- `crossterm`
-- `tui-textarea`
+- `ratatui` — terminal UI framework
+- `crossterm` — cross-platform terminal backend (Windows, Linux, macOS)
+- `tui-textarea` — multi-line input widget
+
+`ratatui` is the committed TUI framework, not a suggestion. Alternatives are out
+of scope unless a future ADR supersedes ADR-0006.
 
 ### `unshackled-store`
 

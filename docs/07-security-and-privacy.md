@@ -107,12 +107,14 @@ Rules:
 Bypass removes the main safety net against model-initiated destructive actions.
 It should be used only in disposable or sandboxed environments.
 
-## Windows Tier-1 Policy
+## Platform Policy (All Tier-1)
 
-Windows is a first-class platform. Shell and filesystem policy must be explicit
-for both Windows and POSIX.
+Windows, Linux, and macOS are all first-class, tier-1 platforms. Shell and
+filesystem policy must be explicit for both Windows and POSIX, and behavior
+parity across the three is a release requirement. The subsections below split
+the platform-specific rules; neither side is a degraded fallback.
 
-Windows requirements:
+### Windows
 
 - classify PowerShell, `cmd.exe`, and direct executable invocations separately
 - normalize drive-letter, UNC, symlink, junction, and long-path forms
@@ -122,12 +124,13 @@ Windows requirements:
 - prefer native Rust filesystem APIs for tool operations
 - test path escapes with `..`, drive roots, UNC paths, junctions, and symlinks
 
-POSIX requirements:
+### Linux and macOS (POSIX)
 
 - normalize symlinks before write/delete decisions
 - detect destructive shell patterns such as `rm -rf`
-- treat privilege escalation commands as privileged
+- treat privilege escalation commands (`sudo`, `doas`) as privileged
 - distinguish workspace-local writes from external writes
+- test path escapes with `..`, absolute roots, and symlinks
 
 ## Network Policy
 
