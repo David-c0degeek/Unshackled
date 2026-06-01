@@ -108,7 +108,8 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 |---|---|---|---|---|---|
 | D001 | 2026-06-01 | 10 subjects, not 5–8 | Plan uses 10 subject files. | v1 spans 16 spec phases / ~170 checklist items across hard crate seams; bundling by seam is clearer than two competing plans and keeps each subject reviewable. | §3, all subjects |
 | D002 | 2026-06-01 | Subject 07 is a known scope-drag risk | Keep quota+MCP+skills+memory in one subject for now; **split trigger**: if execution stalls (a single box open across 3+ slices, or the subject exceeds ~1.5× the slice budget of its neighbours), split 07 into `07a` quota/MCP and `07b` skills/memory, log the split here, and renumber via new files (07a/07b) without renumbering existing boxes. | Highest-surface subject (4 phases). Documenting the trigger now avoids an ad-hoc mid-run reshuffle. | `tasks/unshackled/07-extensions.md` |
-| D003 | | | | | |
+| D003 | 2026-06-02 | MCP posture for the run | **Start without MCP servers.** No cargo-wrapper MCPs. Revisit the read-only OpenAI Docs MCP when provider work (subject 03) begins, and only after auditing the server. | `docs/14` §2 recommendation; shell + cargo + LSP cover the workflow and every added MCP is untrusted third-party code on the workspace. | 00.6 |
+| D004 | 2026-06-02 | Dev-tool versions pinned to MSRV 1.82 | Install `cargo-nextest 0.9.92`, `cargo-machete 0.7.0`, `cargo-insta 1.47.2`; not the latest. | Latest `cargo-nextest` needs rustc 1.91 and latest `cargo-machete` needs the `edition2024` cargo feature; both exceed the pinned 1.82 toolchain. `nextest 0.9.97-b.2` (the newest 1.82-compatible) segfaults on Windows, so the last stable `0.9.92` is used. Dev tooling only — nothing ships. | 00.2 |
 
 ---
 
@@ -126,7 +127,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
-| [ ] | 00 | `tasks/unshackled/00-bootstrap-tooling.md` | TODO | agent: 6; tech-lead: 2; release-engineer: 1 | yes |
+| [x] | 00 | `tasks/unshackled/00-bootstrap-tooling.md` | DONE | agent: 6; tech-lead: 2; release-engineer: 1 | yes |
 | [ ] | 01 | `tasks/unshackled/01-foundation.md` | TODO | agent: 10 | n/a |
 | [ ] | 02 | `tasks/unshackled/02-core-config-store.md` | TODO | agent: 15 | n/a |
 | [ ] | 03 | `tasks/unshackled/03-provider-runtime.md` | TODO | agent: 12; tech-lead: 1; release-engineer: 1 | yes |
