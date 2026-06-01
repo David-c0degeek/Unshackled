@@ -2,6 +2,10 @@
 
 Unshackled is a Rust-native, provider-neutral coding-agent harness.
 
+Maintained by C0deGeek.dev (David, Bram).
+Repository: <https://github.com/David-c0degeek/Unshackled-Rust>
+Runs on Windows, Linux, and macOS — all first-class, tier-1 platforms.
+
 It is not a fork, clone, port, or redistribution of any vendor CLI. The project
 is designed from first principles around a small set of public concepts:
 
@@ -36,7 +40,7 @@ crates/
   unshackled-llm/       Official provider API abstraction
   unshackled-tools/     Tool registry and tool execution contracts
   unshackled-harness/   Intake, planning, progress, and rule engine
-  unshackled-tui/       Terminal UI
+  unshackled-tui/       Terminal UI (ratatui + crossterm)
   unshackled-store/     Session persistence
   unshackled-sandbox/   Permission and execution policy
   unshackled-mcp/       MCP integration boundary
@@ -54,11 +58,15 @@ docs/
   10-decisions.md
   11-implementation-checklist.md
   12-feature-specs.md
+  13-rust-best-practices.md
+  14-dev-tooling.md
 ```
 
 ## Build
 
-```powershell
+The same commands work on Windows (PowerShell), Linux, and macOS (bash/zsh):
+
+```sh
 cargo check
 cargo test
 cargo run -p unshackled -- doctor

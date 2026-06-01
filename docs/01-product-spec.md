@@ -15,6 +15,22 @@ The product is not a general chatbot. It is an engineering workflow controller.
 - power users who run local models
 - teams that want auditable agent sessions before adopting hosted automation
 
+## Maintainers
+
+Unshackled is developed and maintained by C0deGeek.dev (David, Bram). The
+canonical repository is <https://github.com/David-c0degeek/Unshackled-Rust>.
+
+## Supported Platforms
+
+Windows, Linux, and macOS are all first-class, tier-1 targets. No platform is a
+second-class port:
+
+- behavior parity across the three platforms is a release requirement
+- shell and filesystem policy is defined explicitly for both Windows and POSIX
+  (see the security spec)
+- CI builds and tests on Windows, Ubuntu, and macOS for every change
+- installers ship for all three platforms
+
 ## Non-Goals
 
 - no private consumer-product endpoint automation

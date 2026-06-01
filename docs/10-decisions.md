@@ -2,6 +2,36 @@
 
 This file starts the decision log. Add new records at the top.
 
+## ADR-0007: Windows, Linux, and macOS Are All Tier-1
+
+Status: accepted
+
+Unshackled targets Windows, Linux, and macOS as equal first-class platforms. No
+platform is a second-class port. Behavior parity is a release requirement, CI
+builds and tests on all three, and installers ship for all three.
+
+Reason:
+
+- the target users run on all three platforms
+- shell/filesystem security policy must be correct per-platform, not POSIX-only
+- treating one OS as primary causes silent breakage on the others
+- forces explicit Windows and POSIX command/path handling from the start
+
+## ADR-0006: Ratatui as the TUI Framework
+
+Status: accepted
+
+The terminal UI is built on `ratatui` with the `crossterm` backend and
+`tui-textarea` for input. This is a committed choice, not a recommendation.
+
+Reason:
+
+- `ratatui` is actively maintained and the de facto Rust TUI framework
+- `crossterm` provides one terminal backend across Windows, Linux, and macOS,
+  supporting the tier-1 platform commitment (ADR-0007)
+- a single committed stack keeps rendering, layout, and snapshot tests uniform
+- alternatives are out of scope unless a future ADR supersedes this one
+
 ## ADR-0005: Read-Only Local Behavior Reference
 
 Status: accepted

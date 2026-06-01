@@ -2,7 +2,7 @@
 
 ## Foundation
 
-- [ ] Replace repository URL placeholders.
+- [x] Replace repository URL placeholders. (https://github.com/David-c0degeek/Unshackled-Rust)
 - [ ] Add GitHub Actions.
 - [ ] Add `cargo-deny` CI step.
 - [ ] Add `cargo-audit` CI step.
