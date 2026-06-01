@@ -7,7 +7,7 @@
 > **Disposable.** The plan and its `tasks/<name>/` folder are deleted (or
 > archived out of the repo) once the subject ships to production. Shipped
 > code, comments, tests, identifiers, and commit messages must not depend on or
-> reference them — see §6.9.
+> reference them — see §6.11.
 
 > **Terms.**
 > - **Subject** — one file under `tasks/<name>/` (`NN-<slug>.md`). 5-8 per plan.
@@ -136,7 +136,7 @@
 ## 6. Cross-cutting principles
 
 > These apply to every subject file. Violations are blockers, not nits.
-> 1-9 are **defaults distilled from prior runs** — keep, cut, or trim
+> 1-11 are **defaults distilled from prior runs** — keep, cut, or trim
 > each to what actually bites this plan. Lift any others from
 > `AGENTS.md` / `CLAUDE.md`. Principles 2-4 are **C#/.NET-specific** —
 > drop them for a non-.NET plan.
@@ -145,12 +145,14 @@
 2. *(C#)* One class per file.
 3. *(C#)* Nullable reference types enabled.
 4. *(.NET)* No new build warnings.
-5. **Spec at the contract level, not the SDK level.** State requirements as testable contracts on observable behaviour. Do not prescribe SDK call shapes — that's the implementer's choice. (Lesson from messaging plan: the spec said "one `SendAsync` per message" and the SB SDK couldn't honour the per-message error semantics implied. Three Decision-log amendments resulted. State *what* must be true, not *how* to call.)
-6. **Coverage % is a smell-detector, not a goal.** A test exists to pin observable behaviour, not to chase a number. If you can't articulate "this test prevents future-X bug", delete it. Coverage gate failures should provoke "why is this code path untested?" — not "let's write a test that touches it". Architecture tests pin contracts; coverage gates flag gaps. Don't conflate them.
-7. **Every plan box has an owner and a stable ID.** Owner from the §5 enum; ID `<subject-id>.<box-number>`. See §5.
-8. **Lessons land in `tasks/<name>/lessons.md` as they happen**, not at the gate — per-plan run-notes that die with the folder. Durable lessons migrate to the permanent `tasks/lessons.md` at §7.
-9. **Code is plan-agnostic.** Comments, test names, commit messages, and identifiers must read as permanent project artefacts. Never reference the plan, slices, box IDs (`<subject-id>.<box-number>`), decision-log entries (`D###`), or this file — they vanish when the plan is deleted after go-live (see Purpose). A dangling `// see 03.2` or `// per Decision D007` becomes a broken reference in production. Put the *why* directly in the comment.
-10. *(plan-specific principles below)*
+5. **Keep code modular and locally understandable.** Prefer small, cohesive modules with explicit boundaries. Split files before they become catch-all dumping grounds; split methods when branching, nesting, or mixed responsibilities make them hard to scan. If a file or method has to be large, record why and pin the coordinated behaviour with tests.
+6. **Cyclomatic complexity stays low.** Branch-heavy methods are blockers unless the branching is inherent to the domain and covered by focused tests. Prefer guard clauses, extracted decision helpers, table-driven cases, or explicit strategy objects over deep `if`/`else`, nested `switch`, or boolean-flag flows. If the repo has a cyclomatic-complexity threshold, meet it; otherwise treat double-digit complexity in a method as design pressure to simplify.
+7. **Spec at the contract level, not the SDK level.** State requirements as testable contracts on observable behaviour. Do not prescribe SDK call shapes — that's the implementer's choice. (Lesson from messaging plan: the spec said "one `SendAsync` per message" and the SB SDK couldn't honour the per-message error semantics implied. Three Decision-log amendments resulted. State *what* must be true, not *how* to call.)
+8. **Coverage % is a smell-detector, not a goal.** A test exists to pin observable behaviour, not to chase a number. If you can't articulate "this test prevents future-X bug", delete it. Coverage gate failures should provoke "why is this code path untested?" — not "let's write a test that touches it". Architecture tests pin contracts; coverage gates flag gaps. Don't conflate them.
+9. **Every plan box has an owner and a stable ID.** Owner from the §5 enum; ID `<subject-id>.<box-number>`. See §5.
+10. **Lessons land in `tasks/<name>/lessons.md` as they happen**, not at the gate — per-plan run-notes that die with the folder. Durable lessons migrate to the permanent `tasks/lessons.md` at §7.
+11. **Code is plan-agnostic.** Comments, test names, commit messages, and identifiers must read as permanent project artefacts. Never reference the plan, slices, box IDs (`<subject-id>.<box-number>`), decision-log entries (`D###`), or this file — they vanish when the plan is deleted after go-live (see Purpose). A dangling `// see 03.2` or `// per Decision D007` becomes a broken reference in production. Put the *why* directly in the comment.
+12. *(plan-specific principles below)*
 
 ---
 
@@ -163,7 +165,7 @@
 - [ ] Build command for this plan passes with 0 errors and 0 new warnings. Default for .NET: `dotnet build <Solution>.sln`
 - [ ] Test command for this plan passes. Default for .NET: `dotnet test <Solution>.sln`; coverage gate met if the repo enforces one
 - [ ] Cross-cutting principles from §6 reviewed; any plan-specific architecture tests/rules hold
-- [ ] Shipped code/tests/comments/identifiers are plan-agnostic — grep the repo **excluding `tasks/`** for box IDs (`\b\d\d\.\d+\b`), decision IDs (`\bD\d{3}\b`), the literal `tasks/<name>/`, the plan filename `<Name>-Plan.md`, and `\bslices?\b`; zero hits after triaging false positives (version strings can match the box-ID pattern; "slice" may be a legit domain term). See §6.9
+- [ ] Shipped code/tests/comments/identifiers are plan-agnostic — grep the repo **excluding `tasks/`** for box IDs (`\b\d\d\.\d+\b`), decision IDs (`\bD\d{3}\b`), the literal `tasks/<name>/`, the plan filename `<Name>-Plan.md`, and `\bslices?\b`; zero hits after triaging false positives (version strings can match the box-ID pattern; "slice" may be a legit domain term). See §6.11
 - [ ] Commit messages are plan-agnostic — `git log <base>..HEAD` mentions no box IDs, decision IDs, `tasks/<name>/`, `<Name>-Plan.md`, or `slice`/`slices` (apply the same false-positive triage; file grep does not cover commit messages)
 - [ ] `tasks/<name>/manual-actions.md` — every human-owned box resolved or explicitly deferred
 - [ ] *(plan-specific gates below)*
