@@ -10,6 +10,7 @@ use unshackled_llm::{ModelEvent, ModelRequest, ProviderRegistry};
 use unshackled_store::Store;
 
 mod doctor;
+mod harness_cmd;
 mod session_cmd;
 
 #[derive(Debug, Parser)]
@@ -24,8 +25,17 @@ struct Cli {
 enum Command {
     /// Report version, platform, config, providers, tools, and trust state.
     Doctor,
-    /// Initialize project-local harness state.
-    Init,
+    /// Initialize project-local harness state (.unshackled.toml + .gitignore).
+    Init {
+        /// Also initialize a git repository if one is not present.
+        #[arg(long)]
+        git: bool,
+    },
+    /// Harness subcommands (rule-enforced operating mode).
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
     /// Export a session transcript as a redacted, inspectable bundle.
     Export {
         /// Session id to export.
@@ -68,6 +78,12 @@ enum Command {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum HarnessCommand {
+    /// Read-only summary of the harness state (works without a provider).
+    Status,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -79,10 +95,18 @@ async fn main() -> anyhow::Result<()> {
             doctor::run(&mut stdout)?;
             stdout.flush()?;
         }
-        Command::Init => {
+        Command::Init { git } => {
+            let summary = harness_cmd::init(&std::env::current_dir()?, git)?;
             let mut stdout = io::stdout().lock();
-            writeln!(stdout, "initialized scaffold")?;
+            writeln!(stdout, "{summary}")?;
         }
+        Command::Harness { command } => match command {
+            HarnessCommand::Status => {
+                let mut stdout = io::stdout().lock();
+                harness_cmd::status(&std::env::current_dir()?, &mut stdout)?;
+                stdout.flush()?;
+            }
+        },
         Command::Export { session, out } => {
             let session_id = SessionId::from_str(&session)
                 .map_err(|e| anyhow::anyhow!("invalid session id '{session}': {e}"))?;
