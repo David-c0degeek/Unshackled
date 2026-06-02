@@ -74,12 +74,12 @@
       (`docs/03` Phase 12 Done-when). (Verified: `assert_cmd` tests — inspect
       lists entries; delete removes one; disable stops injection; global memory
       requires consent.)
-- [ ] **07.11** (agent) Define the Unshackled **skill manifest** (`docs/12`
+- [x] **07.11** (agent) Define the Unshackled **skill manifest** (`docs/12`
       Skills): `skills/<name>/{SKILL.md, skill.toml, assets/, scripts/, tests/}`;
       `skill.toml` declares name, description, version, triggers, required tools,
       permissions, assets, scripts. (Verified: manifest parse test; invalid
       manifest reports the bad field.)
-- [ ] **07.12** (agent) Implement skill **loading** (project-local + user-local),
+- [x] **07.12** (agent) Implement skill **loading** (project-local + user-local),
       exposing skill instructions to the agent, with skill validation and
       permission declarations visible before execution (`docs/03` Phase 11
       Done-when). Trigger semantics: description-based relevance default; optional
@@ -87,11 +87,11 @@
       relevance explainable in debug; manual invocation by name (`docs/12`).
       (Verified: a checked-in local skill guides an agent turn; skill permissions
       shown before execution.)
-- [ ] **07.13** (agent) Implement skill **asset/script** support with permission
+- [x] **07.13** (agent) Implement skill **asset/script** support with permission
       declarations routed through the permission engine (never a bypass,
       `docs/03` Phase 11, `docs/05` safety invariants). (Verified: a skill script
       invocation prompts/denies per its declared permissions.)
-- [ ] **07.14** (agent) Implement usage-pattern tracking + **generated skill
+- [x] **07.14** (agent) Implement usage-pattern tracking + **generated skill
       drafts** from repeated workflows (same command sequence / setup / error-fix
       loop / prompt template), saved as **disabled drafts** requiring explicit
       user review of content, permissions, and triggers; suggestion cooldown per
