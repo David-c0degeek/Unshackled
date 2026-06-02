@@ -12,6 +12,7 @@ use unshackled_store::Store;
 mod doctor;
 mod harness_cmd;
 mod memory_cmd;
+mod repl;
 mod session_cmd;
 
 #[derive(Debug, Parser)]
@@ -61,6 +62,21 @@ enum Command {
         /// Provider id; defaults to the configured default provider.
         #[arg(long)]
         provider: Option<String>,
+    },
+    /// Launch the interactive terminal REPL (the TUI).
+    Chat {
+        /// Model name to request.
+        #[arg(long)]
+        model: String,
+        /// Provider id; defaults to the configured default provider.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Permission profile (default | relaxed | bypass).
+        #[arg(long)]
+        permission: Option<String>,
+        /// Shorthand for `--permission bypass`. Must be set explicitly.
+        #[arg(long)]
+        bypass: bool,
     },
     /// Run the agent loop once non-interactively and print the answer (pipelines).
     Print {
@@ -225,6 +241,15 @@ async fn main() -> anyhow::Result<()> {
             provider,
         } => {
             ask(&prompt, &model, provider.as_deref()).await?;
+        }
+        Command::Chat {
+            model,
+            provider,
+            permission,
+            bypass,
+        } => {
+            let profile = session_cmd::resolve_profile(permission.as_deref(), bypass);
+            repl::run_chat(&model, provider.as_deref(), profile).await?;
         }
         Command::Print {
             prompt,
