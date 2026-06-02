@@ -13,7 +13,7 @@
 ## Boxes
 > ID = `07.<box-number>`. Owners: agent · tech-lead.
 
-- [ ] **07.1** (agent) Implement quota error classification + reset-window
+- [x] **07.1** (agent) Implement quota error classification + reset-window
       parsing in `unshackled-quota` using the subject-03 provider metadata
       (`retry_after`/`reset_at`/`limit_kind`/`retryable`/`raw_provider_code`,
       `docs/03` Phase 13, `docs/12`); estimate windows with bounded backoff +
@@ -25,21 +25,21 @@
       only at harness **step boundaries**. (Verified: `docs/08` Harness test —
       quota pause/resume at a step boundary; paused state persisted as an
       inspectable file.)
-- [ ] **07.3** (agent) Implement the resume **modes** (`docs/12` Quota): `off`,
+- [x] **07.3** (agent) Implement the resume **modes** (`docs/12` Quota): `off`,
       `ask`, `run` (per-run auto-resume), `global` (unattended); config keys
       `auto_resume`, `max_wait_minutes`, `resume_requires_clean_workspace`,
       `resume_requires_no_pending_approval`, `resume_only_at_step_boundary`.
       Global unattended resume requires explicit config (`docs/03` Phase 13
       Done-when). (Verified: mode-selection tests; a test that `global` is off
       unless explicitly set.)
-- [ ] **07.4** (agent) Enforce quota **safety gates** (`docs/07`, `docs/12`):
+- [x] **07.4** (agent) Enforce quota **safety gates** (`docs/07`, `docs/12`):
       never resume through a pending destructive approval; never with dirty
       unrelated workspace; never mid-step; never after user cancellation; never
       if provider identity/config changed during the wait; re-probe after the
       timer; record why it paused and why it resumed; do not frame as bypassing
       limits. (Verified: one test per gate; a fake quota window pauses then
       resumes in tests; permission gates still stop unsafe actions.)
-- [ ] **07.5** (agent) Implement **continuous development mode** (`docs/01`
+- [x] **07.5** (agent) Implement **continuous development mode** (`docs/01`
       Continuous Development Mode): long-running harness work that pauses cleanly
       on quota/rate limits, records the reset timer, resumes per policy, never
       bypasses permission policy, never continues after destructive pending
@@ -127,3 +127,13 @@
 - [ ] Verdict is `CLOSE`
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 07.1, 07.3–07.5 · `unshackled-quota`: window estimation
+  from subject-03 `QuotaInfo` (retry_after → reset_at → bounded backoff+jitter),
+  persistable inspectable `PausedRun`, resume modes (`off`/`ask`/`run`/`global`,
+  default Off), and `decide_resume` enforcing all six safety gates before mode
+  (never through pending destructive approval / dirty workspace / mid-step / after
+  cancellation / on provider-identity change / past max wait). Verified: 7 tests
+  incl. one-per-gate, global-off-by-default, continuous pause→resume across a
+  window; clippy(-D)/fmt clean. (07.2 paused-state store persistence lands with
+  07.15; the inspectable file format + round-trip are done here.)
