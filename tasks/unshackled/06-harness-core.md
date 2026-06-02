@@ -60,11 +60,11 @@
       feature description → appended brief notes + appended/inserted progress
       steps without renumbering completed steps. (Verified: test — feature
       append leaves existing step IDs/commit metadata intact.)
-- [ ] **06.9** (agent) Define rule-engine **trigger** types (`docs/06`):
+- [x] **06.9** (agent) Define rule-engine **trigger** types (`docs/06`):
       `session_start`, `pre_tool`, `post_tool`, `pre_edit`, `post_edit`,
       `pre_shell`, `post_shell`, `pre_commit`, `post_test`, `step_complete`.
       (Verified: trigger enum + dispatch test.)
-- [ ] **06.10** (agent) Define **verdict** types + the rule registry (`docs/06`):
+- [x] **06.10** (agent) Define **verdict** types + the rule registry (`docs/06`):
       `allow`, `warn`, `retry`, `discard`, `block`. Config can tighten policy but
       MUST NOT silently bypass critical rules (`docs/03` Phase 7 Done-when).
       (Verified: verdict enum; a test that config cannot downgrade a critical
@@ -80,7 +80,7 @@
       failures are visible to model and user (`docs/03` Phase 7 Done-when).
       (Verified: `docs/08` Harness tests — rule retry path; rule discard path;
       one unit test per baseline rule.)
-- [ ] **06.12** (agent) Implement rule **config overrides** and attempt counters
+- [x] **06.12** (agent) Implement rule **config overrides** and attempt counters
       driven by `[harness.rules]` and `attempts_per_step` (`docs/06`). (Verified:
       `docs/08` Harness tests — attempt counter increment; config override
       changes a non-critical rule's verdict.)
