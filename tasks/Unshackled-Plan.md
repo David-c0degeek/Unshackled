@@ -110,6 +110,9 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | D002 | 2026-06-01 | Subject 07 is a known scope-drag risk | Keep quota+MCP+skills+memory in one subject for now; **split trigger**: if execution stalls (a single box open across 3+ slices, or the subject exceeds ~1.5× the slice budget of its neighbours), split 07 into `07a` quota/MCP and `07b` skills/memory, log the split here, and renumber via new files (07a/07b) without renumbering existing boxes. | Highest-surface subject (4 phases). Documenting the trigger now avoids an ad-hoc mid-run reshuffle. | `tasks/unshackled/07-extensions.md` |
 | D003 | 2026-06-02 | MCP posture for the run | **Start without MCP servers.** No cargo-wrapper MCPs. Revisit the read-only OpenAI Docs MCP when provider work (subject 03) begins, and only after auditing the server. | `docs/14` §2 recommendation; shell + cargo + LSP cover the workflow and every added MCP is untrusted third-party code on the workspace. | 00.6 |
 | D004 | 2026-06-02 | Dev-tool versions pinned to MSRV 1.82 | Install `cargo-nextest 0.9.92`, `cargo-machete 0.7.0`, `cargo-insta 1.47.2`; not the latest. | Latest `cargo-nextest` needs rustc 1.91 and latest `cargo-machete` needs the `edition2024` cargo feature; both exceed the pinned 1.82 toolchain. `nextest 0.9.97-b.2` (the newest 1.82-compatible) segfaults on Windows, so the last stable `0.9.92` is used. Dev tooling only — nothing ships. | 00.2 |
+| D005 | 2026-06-02 | `cargo ci` shipped as per-step aliases | `.cargo/config.toml` defines `ci-fmt`/`ci-lint`/`ci-test`/`ci-check` rather than a single `cargo ci`. | Cargo aliases cannot chain multiple subcommands, and a one-shot runner would need an `xtask`/`cargo-make` crate — adding a 15th member conflicts with box 01.1's "14 crates" gate. CONTRIBUTING documents running the four as the local gate. | 01.4 |
+| D006 | 2026-06-02 | `deny.toml` wildcards = warn | Internal `{ path = ... }` members read as wildcard deps; `allow-wildcard-paths` does not exempt publishable crates, so `bans.wildcards` is set to `warn` (not `deny`) for now. | Keeps `cargo deny check` green without prematurely deciding the crates.io publish posture (and `publish = false` on every member). Tighten to `deny` + `publish=false` at release (subject 09). | 01.7 |
+| D007 | 2026-06-02 | Pin `tempfile 3.14.0` / `getrandom 0.2.15` | Lock `insta`'s transitive `tempfile` to 3.14.0 and `getrandom` to 0.2.15. | `tempfile` ≥3.16 pulls `getrandom` ≥0.3, whose 0.4.x manifest requires the unstable `edition2024` cargo feature and fails to parse under the pinned 1.82 toolchain. Dev/test-only deps. | 01.9 |
 
 ---
 
@@ -128,7 +131,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
 | [x] | 00 | `tasks/unshackled/00-bootstrap-tooling.md` | DONE | agent: 6; tech-lead: 2; release-engineer: 1 | yes |
-| [ ] | 01 | `tasks/unshackled/01-foundation.md` | TODO | agent: 10 | n/a |
+| [x] | 01 | `tasks/unshackled/01-foundation.md` | DONE | agent: 10 | n/a |
 | [ ] | 02 | `tasks/unshackled/02-core-config-store.md` | TODO | agent: 15 | n/a |
 | [ ] | 03 | `tasks/unshackled/03-provider-runtime.md` | TODO | agent: 12; tech-lead: 1; release-engineer: 1 | yes |
 | [ ] | 04 | `tasks/unshackled/04-tools-and-sandbox.md` | TODO | agent: 14 | n/a |

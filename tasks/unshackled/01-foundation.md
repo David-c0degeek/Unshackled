@@ -11,7 +11,7 @@
 ## Boxes
 > ID = `01.<box-number>`. All agent-owned.
 
-- [ ] **01.1** (agent) Add the four missing member crates —
+- [x] **01.1** (agent) Add the four missing member crates —
       `crates/unshackled-memory`, `crates/unshackled-skills`,
       `crates/unshackled-recovery`, `crates/unshackled-quota` — to
       `Cargo.toml` `members`, each with a `Cargo.toml` inheriting
@@ -19,10 +19,10 @@
       `lib.rs` stating its responsibility + must-not-own (mirror `docs/02`
       §Crate Responsibilities). Dependency direction stays one-way (ADR-0001).
       (Verified: `cargo check --workspace` passes with 14 crates.)
-- [ ] **01.2** (agent) Add `#![forbid(unsafe_code)]` to every library crate's
+- [x] **01.2** (agent) Add `#![forbid(unsafe_code)]` to every library crate's
       `lib.rs` (`docs/13` §8/§12). (Verified: present in all 13 lib crates;
       `cargo check --workspace` clean.)
-- [ ] **01.3** (agent) Add a workspace `[workspace.lints]` table centralizing
+- [x] **01.3** (agent) Add a workspace `[workspace.lints]` table centralizing
       the clippy policy from `docs/13` §9/§12: deny `clippy::unwrap_used`,
       `clippy::expect_used` (library crates; allow under `#[cfg(test)]`),
       `clippy::todo`, `clippy::dbg_macro` everywhere; `unsafe_code` forbidden.
@@ -35,38 +35,38 @@
       (record that deferral in `CHANGELOG.md` when it lands). (Verified:
       `cargo clippy --workspace --all-targets -- -D warnings` clean; the targeted
       denies fire on a planted `unwrap()` in library code.)
-- [ ] **01.4** (agent) Add `.cargo/config.toml` aliases for the CI quartet so
+- [x] **01.4** (agent) Add `.cargo/config.toml` aliases for the CI quartet so
       `cargo ci` runs `fmt --check` + `clippy --workspace --all-targets -D
       warnings` + test + `check --workspace` locally exactly as CI does
       (`docs/14` §4). (Verified: `cargo ci` runs the four steps.)
-- [ ] **01.5** (agent) Add `.editorconfig` enforcing final newline, LF for
+- [x] **01.5** (agent) Add `.editorconfig` enforcing final newline, LF for
       tracked text, and `max_width`-friendly settings, supporting the
       cross-platform line-ending rule (`docs/13` §7, `docs/14` §4). (Verified:
       file present; `rustfmt.toml` `newline_style = "Auto"` unchanged.)
-- [ ] **01.6** (agent) Expand `.github/workflows/ci.yml`: keep the 3-OS matrix
+- [x] **01.6** (agent) Expand `.github/workflows/ci.yml`: keep the 3-OS matrix
       and fmt/clippy/test/check; switch test to `cargo nextest run --workspace`
       with a fallback note; add a non-blocking `cargo deny check` + `cargo audit`
       job (to be promoted to blocking before release per `docs/14` §4). Pin the
       1.82 toolchain (already pinned). (Verified: CI config parses; jobs defined
       for all three OSes.)
-- [ ] **01.7** (agent) Add a dependency policy note + ensure `deny.toml` covers
+- [x] **01.7** (agent) Add a dependency policy note + ensure `deny.toml` covers
       `[licenses]` (present), and stub `[bans]`/`[sources]` awareness for when
       the tree grows (`docs/13` §1–2, §8). Confirm all current workspace deps are
       exact-pinned (they are) and pass `cargo deny check`. (Verified:
       `cargo deny check` exits 0.)
-- [ ] **01.8** (agent) Add a git pre-commit hook (or `cargo-husky`) running
+- [x] **01.8** (agent) Add a git pre-commit hook (or `cargo-husky`) running
       `cargo fmt --check` and a fast `cargo clippy` so style failures are caught
       before push (`docs/14` §4). Keep it opt-in/documented so it does not block
       CI-less contributors. (Verified: hook script present; documented in
       `CONTRIBUTING.md`.)
-- [ ] **01.9** (agent) Replace the stub `doctor` command with a real
+- [x] **01.9** (agent) Replace the stub `doctor` command with a real
       diagnostics command in `unshackled-cli`: report version, OS/platform,
       resolved config path(s), provider config status (without secrets),
       detected tool availability (e.g. ripgrep, git), and workspace trust state.
       Output goes through a command-output layer, not `println!` scattered
       (`docs/13` §11). (Verified: snapshot test of `unshackled doctor` output;
       no secrets printed.)
-- [ ] **01.10** (agent) Update `CHANGELOG.md` `## Unreleased` with foundation
+- [x] **01.10** (agent) Update `CHANGELOG.md` `## Unreleased` with foundation
       changes (new crates, lint table, CI expansion) as its own note; raising
       MSRV/unpinning is never a side effect (`docs/13` §1). Confirm Phase 0
       "Done when": `cargo check --workspace` and `cargo test --workspace` pass,
@@ -74,3 +74,19 @@
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 01.1–01.10 · Added 4 crates (`unshackled-memory`,
+  `-skills`, `-recovery`, `-quota`) with responsibility/must-not-own module docs;
+  workspace now 14 crates (`cargo check` green). Added `#![forbid(unsafe_code)]`
+  to all 13 lib crates + `[workspace.lints]` (deny unwrap/expect/todo/dbg, forbid
+  unsafe) with `clippy.toml` test relaxations; verified a planted `unwrap()` fires
+  the deny. Added `.cargo/config.toml` CI aliases (D005: cargo can't chain a single
+  `cargo ci`, so per-step `ci-fmt/ci-lint/ci-test/ci-check`), `.editorconfig`,
+  `.gitattributes` (LF). Bumped `tokio` 1.42→1.44.2 + `tracing-subscriber`
+  0.3.19→0.3.20 to clear RUSTSEC-2025-0023/0055; `cargo deny check` + `cargo audit`
+  now exit 0. Extended `deny.toml` ([bans]/[sources]; wildcards=warn for path deps,
+  D006). Expanded CI (nextest + non-blocking supply-chain job). Added opt-in
+  `.githooks/pre-commit`. Replaced stub `doctor` with real diagnostics
+  (version/platform/config paths/provider credential presence/tool availability/
+  trust); snapshot test + secret-leak test pass; ran live. CHANGELOG updated.
+  Verified: fmt/clippy(-D warnings)/check/test all green across workspace.
