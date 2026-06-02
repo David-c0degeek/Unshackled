@@ -11,6 +11,7 @@ use unshackled_store::Store;
 
 mod doctor;
 mod harness_cmd;
+mod memory_cmd;
 mod session_cmd;
 
 #[derive(Debug, Parser)]
@@ -35,6 +36,11 @@ enum Command {
     Harness {
         #[command(subcommand)]
         command: HarnessCommand,
+    },
+    /// Local project memory: inspect, search, delete, disable.
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
     },
     /// Export a session transcript as a redacted, inspectable bundle.
     Export {
@@ -79,6 +85,20 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum MemoryCommand {
+    /// Entry count and whether injection is enabled.
+    Status,
+    /// List all entries.
+    Inspect,
+    /// Search entries by query.
+    Search { query: String },
+    /// Delete an entry by id.
+    Delete { id: String },
+    /// Disable memory injection for this project.
+    Disable,
+}
+
+#[derive(Debug, Subcommand)]
 enum HarnessCommand {
     /// Read-only summary of the harness state (works without a provider).
     Status,
@@ -108,7 +128,7 @@ enum HarnessCommand {
         /// The feature description.
         description: String,
     },
-    /// Work the plan: run incomplete steps, committing each.
+    /// Work the plan: run incomplete steps, committing each. (resume)
     Resume {
         /// Model name to request.
         #[arg(long)]
@@ -176,6 +196,19 @@ async fn main() -> anyhow::Result<()> {
                     harness_cmd::resume(&cwd, &model, provider.as_deref(), profile, &mut stdout)
                         .await?;
                 }
+            }
+        }
+        Command::Memory { command } => {
+            let cwd = std::env::current_dir()?;
+            let mut stdout = io::stdout().lock();
+            match command {
+                MemoryCommand::Status => memory_cmd::status(&cwd, &mut stdout)?,
+                MemoryCommand::Inspect => memory_cmd::inspect(&cwd, &mut stdout)?,
+                MemoryCommand::Search { query } => {
+                    memory_cmd::search(&cwd, &query, &mut stdout)?;
+                }
+                MemoryCommand::Delete { id } => memory_cmd::delete(&cwd, &id, &mut stdout)?,
+                MemoryCommand::Disable => memory_cmd::disable(&cwd, &mut stdout)?,
             }
         }
         Command::Export { session, out } => {

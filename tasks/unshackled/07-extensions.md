@@ -56,19 +56,19 @@
       channel (`docs/03` Phase 14 Done-when, `docs/02`). (Verified: a permission
       test asserting an MCP write prompts/denies exactly like a builtin write;
       redaction applied to MCP tool output.)
-- [ ] **07.8** (agent) Define the local **memory file format** (flat,
+- [x] **07.8** (agent) Define the local **memory file format** (flat,
       inspectable) in `unshackled-memory` (`docs/03` Phase 12, `docs/12`): tagged
       entries (project facts, durable decisions, recurring workflows,
       dependency/architecture notes, frequent failures+fixes, accepted skill
       suggestions). Defer graph/entity extraction until the flat store proves
       useful. (Verified: format round-trip; inspectable plain files.)
-- [ ] **07.9** (agent) Implement memory **retrieval** with relevance ranking,
+- [x] **07.9** (agent) Implement memory **retrieval** with relevance ranking,
       token cap, recency/verified preference, and a relevance threshold below
       which stale entries are not injected; injected memories shown in
       debug/inspect output (`docs/12`, `docs/08` Context). Redact before memory
       writes (`docs/07`). (Verified: `docs/08` Context tests — memory injection
       respects token caps; stale memory not injected below threshold.)
-- [ ] **07.10** (agent) Implement memory commands (`docs/12`): `memory status`,
+- [x] **07.10** (agent) Implement memory commands (`docs/12`): `memory status`,
       `memory search`, `memory inspect`, `memory delete`, `memory disable`;
       project-level opt-out; explicit first-run consent for global memory
       (`docs/03` Phase 12 Done-when). (Verified: `assert_cmd` tests — inspect

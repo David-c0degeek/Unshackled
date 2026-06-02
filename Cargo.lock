@@ -2064,6 +2064,7 @@ dependencies = [
  "unshackled-core",
  "unshackled-harness",
  "unshackled-llm",
+ "unshackled-memory",
  "unshackled-recovery",
  "unshackled-sandbox",
  "unshackled-store",
@@ -2145,10 +2146,23 @@ version = "0.1.0"
 [[package]]
 name = "unshackled-memory"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "unshackled-config",
+]
 
 [[package]]
 name = "unshackled-quota"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unshackled-config",
+ "unshackled-llm",
+]
 
 [[package]]
 name = "unshackled-recovery"
