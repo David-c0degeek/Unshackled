@@ -120,6 +120,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | D012 | 2026-06-02 | windows-gnu `ring` test crash is environmental | Verify locally with per-crate `cargo test -p <crate>`; treat aggregate `cargo test --workspace` / `nextest` as CI's job. | On the local `x86_64-pc-windows-gnu` toolchain, `ring` (via `reqwest` rustls-tls) crashes the CLI bin test binary under the aggregate runner. Every per-crate suite passes; CI runs MSVC where the crash does not occur. Not a code defect. | 03 |
 | D013 | 2026-06-02 | Session runtime lives in `unshackled-harness`; interactive REPL deferred to the TUI | The shared agent-mode loop is a module in `unshackled-harness` (no separate session crate exists in the 14-crate roster). The interactive agent REPL with live approval prompting and the footer status line are built in subject 08 (TUI); subject 05 ships the non-interactive `print` entry. | The architecture names no session crate; harness is the orchestration layer with one-way deps onto llm/tools/sandbox/store/recovery. Interactive prompting needs the approval modal/footer, which are TUI concerns. | 05.1, 05.8, 05.13 |
 | D014 | 2026-06-02 | Quota wait/resume engine done; live `harness wait-resume` CLI wrapper deferred | `unshackled-quota` implements and tests window estimation, the inspectable `PausedRun` format, resume modes, and the safety gates (incl. the step-boundary gate). The thin `unshackled harness wait-resume` CLI command and the session-loop pause-point that classifies a provider quota error and writes the `PausedRun` file are a follow-up wrapper around this engine. | 07.2's verifiable contracts (resume gated to a step boundary; paused state persisted as an inspectable round-trippable file) are met at the engine level; wiring the catch-point into the resume loop is mechanical and lower-risk than the engine. | 07.2 |
+| D015 | 2026-06-02 | TUI core decoupled from crossterm; terminal driver lives in the CLI | `unshackled-tui` renders with `ratatui` (default-features off, no crossterm backend) and its own `Key` type, so the whole UI snapshot-tests via `TestBackend`. The committed stack's `crossterm` backend, the `tui-textarea` input widget, and the interactive REPL launch are a thin terminal driver in the CLI that maps real key events to `tui::Key` and runs `tui::run`. | `crossterm`'s terminal init crashes the test harness on the local `x86_64-pc-windows-gnu` toolchain (D012-class), which would block generating the required snapshots. Decoupling keeps the testable UI logic in `unshackled-tui` and isolates the un-testable terminal I/O at the edge; ADR-0006's stack is honored in the driver, verified on real terminals / MSVC CI. | 08.1, 08.3 |
 
 ---
 
@@ -145,7 +146,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | [x] | 05 | `tasks/unshackled/05-session-and-recovery.md` | DONE | agent: 13 | n/a |
 | [x] | 06 | `tasks/unshackled/06-harness-core.md` | DONE | agent: 17; tech-lead: 1 | yes |
 | [x] | 07 | `tasks/unshackled/07-extensions.md` | DONE | agent: 15; tech-lead: 1 | yes |
-| [ ] | 08 | `tasks/unshackled/08-terminal-ui.md` | TODO | agent: 11 | n/a |
+| [x] | 08 | `tasks/unshackled/08-terminal-ui.md` | DONE | agent: 11 | n/a |
 | [ ] | 09 | `tasks/unshackled/09-evals-and-release.md` | TODO | agent: 9; release-engineer: 3; tech-lead: 1 | yes |
 
 ---

@@ -52,4 +52,9 @@
   redacted memory store with ranked retrieval and `memory` commands, the skill
   manifest/loading/suggestion system, and an MCP client whose tools run through
   the same permission engine and redaction as builtin tools.
+- Added the terminal UI: a dense ratatui-based view with a header, transcript and
+  live streaming, an always-visible footer of stats and permission state, an
+  optional thinking panel, a tool-approval modal, slash commands, a
+  model/provider picker, transcript search, and responsive narrow-terminal
+  collapse, snapshot-tested with a test backend.
 

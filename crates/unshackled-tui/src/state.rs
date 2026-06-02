@@ -1,0 +1,187 @@
+//! The TUI view model.
+//!
+//! The TUI is UI-only: it owns layout, rendering, and input, never business
+//! logic. The session runtime's events are mapped into [`UiEvent`]s by the
+//! caller, keeping this crate decoupled from the provider/harness stack.
+
+/// Operating mode shown in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Agent,
+    Harness,
+}
+
+impl Mode {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Agent => "agent",
+            Mode::Harness => "harness",
+        }
+    }
+}
+
+/// Permission profile shown in the UI. `bypass` is always surfaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    Default,
+    Relaxed,
+    Bypass,
+}
+
+impl Profile {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Profile::Default => "default",
+            Profile::Relaxed => "relaxed",
+            Profile::Bypass => "BYPASS",
+        }
+    }
+}
+
+/// Header identity fields.
+#[derive(Debug, Clone)]
+pub struct Header {
+    pub version: String,
+    pub provider: String,
+    pub model: String,
+    pub workspace: String,
+    pub session_id: String,
+}
+
+/// Always-visible footer stats.
+#[derive(Debug, Clone, Default)]
+pub struct FooterStats {
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    pub tokens_per_sec: f64,
+    pub context_used: usize,
+    pub context_limit: usize,
+    pub cost_usd: Option<f64>,
+    pub quota_reset: Option<String>,
+}
+
+/// The optional thinking/reasoning side panel.
+#[derive(Debug, Clone, Default)]
+pub struct ThinkingPanel {
+    pub visible: bool,
+    pub text: String,
+}
+
+/// A pending tool-approval request.
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    pub tool: String,
+    pub target: String,
+    pub risk_class: String,
+}
+
+/// A modal picker (model/provider selection).
+#[derive(Debug, Clone)]
+pub struct Picker {
+    pub title: String,
+    pub options: Vec<String>,
+    pub selected: usize,
+}
+
+/// One transcript entry.
+#[derive(Debug, Clone)]
+pub struct TranscriptLine {
+    pub speaker: String,
+    pub text: String,
+}
+
+/// The full UI state.
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub header: Header,
+    pub transcript: Vec<TranscriptLine>,
+    pub streaming: String,
+    pub input: String,
+    pub footer: FooterStats,
+    pub thinking: ThinkingPanel,
+    pub mode: Mode,
+    pub profile: Profile,
+    pub approval: Option<ApprovalRequest>,
+    pub picker: Option<Picker>,
+    pub search: Option<String>,
+    pub should_quit: bool,
+}
+
+impl AppState {
+    /// A new state with the given identity, an empty transcript, and defaults.
+    #[must_use]
+    pub fn new(header: Header, mode: Mode, profile: Profile) -> Self {
+        Self {
+            header,
+            transcript: Vec::new(),
+            streaming: String::new(),
+            input: String::new(),
+            footer: FooterStats::default(),
+            thinking: ThinkingPanel::default(),
+            mode,
+            profile,
+            approval: None,
+            picker: None,
+            search: None,
+            should_quit: false,
+        }
+    }
+
+    /// Apply a mapped runtime/UI event to the state.
+    pub fn apply(&mut self, event: UiEvent) {
+        match event {
+            UiEvent::TextDelta(delta) => self.streaming.push_str(&delta),
+            UiEvent::ReasoningDelta(delta) => self.thinking.text.push_str(&delta),
+            UiEvent::TurnComplete => {
+                if !self.streaming.is_empty() {
+                    let text = std::mem::take(&mut self.streaming);
+                    self.transcript.push(TranscriptLine {
+                        speaker: "assistant".to_string(),
+                        text,
+                    });
+                }
+            }
+            UiEvent::UserMessage(text) => self.transcript.push(TranscriptLine {
+                speaker: "you".to_string(),
+                text,
+            }),
+            UiEvent::Usage {
+                tokens_in,
+                tokens_out,
+                tokens_per_sec,
+            } => {
+                self.footer.tokens_in = tokens_in;
+                self.footer.tokens_out = tokens_out;
+                self.footer.tokens_per_sec = tokens_per_sec;
+            }
+            UiEvent::QuotaPaused { reset } => self.footer.quota_reset = Some(reset),
+            UiEvent::ApprovalRequested(request) => self.approval = Some(request),
+            UiEvent::ApprovalResolved => self.approval = None,
+            UiEvent::ToggleThinking => self.thinking.visible = !self.thinking.visible,
+            UiEvent::Quit => self.should_quit = true,
+        }
+    }
+}
+
+/// A UI-facing event, mapped from the session runtime by the caller.
+#[derive(Debug, Clone)]
+pub enum UiEvent {
+    UserMessage(String),
+    TextDelta(String),
+    ReasoningDelta(String),
+    Usage {
+        tokens_in: u64,
+        tokens_out: u64,
+        tokens_per_sec: f64,
+    },
+    TurnComplete,
+    QuotaPaused {
+        reset: String,
+    },
+    ApprovalRequested(ApprovalRequest),
+    ApprovalResolved,
+    ToggleThinking,
+    Quit,
+}
