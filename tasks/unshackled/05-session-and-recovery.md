@@ -55,20 +55,20 @@
       under harness mode, the current step contract. (Verified: `docs/08`
       Context tests — compaction preserves tool-result pairing; compaction
       preserves current step contract.)
-- [ ] **05.10** (agent) Implement the recovery model in `unshackled-recovery`:
+- [x] **05.10** (agent) Implement the recovery model in `unshackled-recovery`:
       `ModelHealth` + `RecoveryAction` types; detectors for empty assistant
       turn, repeated-token loop (only after a threshold), slash flood
       (`/////////`), malformed tool call, malformed structured output, repeated
       provider transient error (`docs/03` Phase 9, `docs/12`). (Verified:
       `docs/08` Recovery tests — repeated-token loop detected only after
       threshold; malformed tool calls trigger recovery.)
-- [ ] **05.11** (agent) Make detection **context-aware**: slash-like / repeated
+- [x] **05.11** (agent) Make detection **context-aware**: slash-like / repeated
       punctuation inside fenced code, quoted logs, base64, or explicit
       user-requested output does NOT trigger recovery unless a degenerate
       threshold is exceeded (`docs/12`, `docs/11`). (Verified: `docs/08` Recovery
       tests — slash flood outside code detected; slash-like content inside fenced
       code is not.)
-- [ ] **05.12** (agent) Implement the recovery **ladder** (`docs/12`): abort
+- [x] **05.12** (agent) Implement the recovery **ladder** (`docs/12`): abort
       stream → save diagnostic → retry once with a short repair prompt → reduce
       risky context (drop/summarize oversized tool results, lower local image
       count) → mark provider/model degraded if recovery fails → stop harness
@@ -84,3 +84,14 @@
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 05.10–05.12 · `unshackled-recovery`: `BadOutputKind`,
+  `ModelHealth`, `RecoveryAction`, persistable `RecoveryDiagnostic`; context-aware
+  detectors (empty turn, repeated-token loop past threshold, slash/punctuation
+  flood that tolerates fenced code until a high threshold); `RecoveryEngine`
+  driving the `docs/12` ladder (abort→diagnostic→repair→reduce-context→
+  summarize→degraded→stop-progress) under a hard repair budget, with the
+  `step_completable` invariant (a bad/unrecovered turn or a degraded model cannot
+  complete a harness step). Verified: 8 tests — slash flood in/out of code,
+  threshold loop, malformed-tool-call repair, exhausted-recovery degraded;
+  clippy(-D)/fmt clean. (05.13 CLI/status surfacing lands with the session loop.)
