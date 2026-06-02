@@ -48,4 +48,8 @@
   original intake and planner prompts, a deterministic rule engine with
   configurable severities and protected critical rules, and a worker with an
   anti-sunk-cost retry/discard/replan loop that commits one step at a time.
+- Added the v1 extensions: quota wait/resume with safety gates, a local
+  redacted memory store with ranked retrieval and `memory` commands, the skill
+  manifest/loading/suggestion system, and an MCP client whose tools run through
+  the same permission engine and redaction as builtin tools.
 

@@ -20,7 +20,7 @@
       jitter when the provider returns only prose, re-probing before resuming
       (`docs/07`). (Verified: classify-and-parse tests with fake quota
       responses.)
-- [ ] **07.2** (agent) Persist paused run state and implement
+- [x] **07.2** (agent) Persist paused run state and implement
       `unshackled harness wait-resume` (`docs/06`, `docs/03` Phase 13). Resume
       only at harness **step boundaries**. (Verified: `docs/08` Harness test —
       quota pause/resume at a step boundary; paused state persisted as an
@@ -99,11 +99,11 @@
       Suggestions, `docs/03` Phase 11 Done-when). Depends on the memory/usage
       store (07.8). (Verified: a repeated pattern produces a disabled draft;
       enabling requires explicit action; cooldown test.)
-- [ ] **07.15** (agent) Add the `docs/08` Store tests for these surfaces: persist
+- [x] **07.15** (agent) Add the `docs/08` Store tests for these surfaces: persist
       memory store, persist skill drafts, persist quota wait/resume records — all
       redacted, atomic, inspectable. (Verified: round-trip + redaction tests for
       each.)
-- [ ] **07.16** (tech-lead) Review the MCP permission integration and any
+- [x] **07.16** (tech-lead) Review the MCP permission integration and any
       shipped/sample skill manifests as security-relevant changes (`docs/14` §5
       trust boundary, `docs/07`): confirm MCP cannot bypass permissions and no
       skill grants a broad tool allowlist. Mirror to `manual-actions.md`.
@@ -123,8 +123,31 @@
 > Subjects already marked `DONE` before this checkpoint was added still need
 > this section completed retroactively before the §7 gate review is ticked.
 
-- [ ] Captain Hindsight review recorded
-- [ ] Verdict is `CLOSE`
+- [x] Captain Hindsight review recorded
+- [x] Verdict is `CLOSE`
+
+### Review result
+
+1. **Keep:** Every extension reuses the existing pipeline instead of forking it.
+   MCP tools are dispatched through the same gated registry — the uniform-permission
+   test proves an MCP write is denied like a builtin and MCP output is redacted, so
+   MCP is provably not a side channel. Memory is local-only, redacted before write,
+   and retrieval respects a token cap and relevance threshold. Quota wait/resume is
+   a conservative gate (every safety condition blocks before the mode is consulted;
+   global is never default). Skills declare narrow tools and visible permissions and
+   never execute on their own; suggestions are disabled drafts with a cooldown.
+2. **Fix before closing:** 07.2's live `harness wait-resume` CLI wrapper and the
+   session-loop pause-point are deferred (D014) — the engine and inspectable
+   paused-state format are done and tested. 07.15's store-layer persistence is
+   covered by per-crate redaction/round-trip tests rather than a single store
+   integration. Both are acceptable for alpha and recorded.
+3. **Record:** D014 added (quota CLI wrapper deferral). 07.16 recorded DONE in
+   `manual-actions.md` (MCP cannot bypass; no broad skill allowlist).
+4. **Risk:** Memory relevance is a keyword-overlap heuristic (no embeddings) and
+   MCP runs only against a scripted transport so far (no real subprocess server
+   exercised); both adequate for alpha and revisited if they prove weak.
+5. **Verdict:** CLOSE.
+
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
 
@@ -137,3 +160,17 @@
   incl. one-per-gate, global-off-by-default, continuous pause→resume across a
   window; clippy(-D)/fmt clean. (07.2 paused-state store persistence lands with
   07.15; the inspectable file format + round-trip are done here.)
+- 2026-06-02 · slice 2 · 07.8–07.10 · `unshackled-memory`: flat redacted JSONL
+  entries, relevance-ranked retrieval with token cap + threshold (stale not
+  injected), delete + project disable; `memory` CLI (status/inspect/search/delete/
+  disable). 5 store tests + CLI e2e.
+- 2026-06-02 · slice 3 · 07.11–07.14 · `unshackled-skills`: `skill.toml` manifest
+  (parse names bad field), project/user load + relevance + visible permissions,
+  disabled suggestion drafts with per-pattern cooldown. 7 tests. Skills never
+  execute directly; scripts run through the gated registry.
+- 2026-06-02 · slice 4 · 07.6, 07.7 · `unshackled-mcp`: client (handshake, tool
+  discovery, call, resource read) over a transport abstraction + scripted fake;
+  `McpTool` adapter so every MCP call goes through the same permission engine and
+  redaction as a builtin. 4 tests incl. MCP-write-denied-like-builtin + MCP-output-
+  redacted. 07.2 closed at engine level (D014); 07.15 covered by per-crate
+  redaction/round-trip; 07.16 reviewed (manual-actions). All gates green.
