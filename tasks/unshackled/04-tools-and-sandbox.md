@@ -22,7 +22,7 @@
       tool with `schemars` so schema and deserialized input cannot drift
       (`docs/13` §3). One generation path owned by `unshackled-tools`. (Verified:
       schema snapshot test per tool; bad input deserializes to a typed error.)
-- [ ] **04.3** (agent) Implement workspace **path policy** in
+- [x] **04.3** (agent) Implement workspace **path policy** in
       `unshackled-sandbox`: canonicalize + normalized `starts_with` containment,
       handling Windows `\\?\` verbatim prefixes, case-insensitivity, 8.3 short
       names, ADS (`file.txt:stream`), drive roots, UNC, junctions, symlinks; and
@@ -50,18 +50,18 @@
       without approval) (`docs/05`). Use native Rust FS APIs, not string-built
       shell (`docs/07` Windows). (Verified: ignore-file + cap + containment
       tests.)
-- [ ] **04.8** (agent) Implement command **risk classification** for `run_shell`
+- [x] **04.8** (agent) Implement command **risk classification** for `run_shell`
       shared across OSes, with per-OS rule sets: read-only, project-write,
       external-write, network, destructive, privileged, unknown (`docs/07` Shell
       Policy). (Verified: classification unit tests + proptest on adversarial
       command strings.)
-- [ ] **04.9** (agent) Implement **Windows** command classification (`docs/07`
+- [x] **04.9** (agent) Implement **Windows** command classification (`docs/07`
       Windows, `docs/13` §7): classify PowerShell / `cmd.exe` / direct exe
       separately; detect destructive PowerShell (`Remove-Item -Recurse`); treat
       registry writes as privileged; `%VAR%` syntax; no string-built FS commands.
       (Verified: `#[cfg(windows)]` tests for destructive + privileged detection,
       run on Windows CI.)
-- [ ] **04.10** (agent) Implement **POSIX** command classification (`docs/07`
+- [x] **04.10** (agent) Implement **POSIX** command classification (`docs/07`
       POSIX): detect `rm -rf`-class destructive patterns; treat `sudo`/`doas` as
       privileged; `$VAR` syntax; distinguish workspace-local vs external writes;
       do not hardcode `/bin/sh`. (Verified: `#[cfg(unix)]` tests run on
@@ -76,7 +76,7 @@
       for subject 06; message must not contain secrets; only intended files)
       (`docs/05`). (Verified: git_status round-trips on a temp repo; git_commit
       rejects a secret-bearing message.)
-- [ ] **04.13** (agent) Implement the **permission engine** in
+- [x] **04.13** (agent) Implement the **permission engine** in
       `unshackled-sandbox`: decision `Allow`/`Ask`/`Deny` from inputs (tool name,
       normalized path, command class, workspace trust, interactive vs
       non-interactive, user policy, harness rule state) and the
@@ -103,3 +103,16 @@
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 04.3, 04.8–04.10, 04.13 · `unshackled-sandbox`: workspace
+  path containment (lexical `..` normalization + existing-prefix canonicalize for
+  symlink/8.3/case/verbatim safety; naive `starts_with` avoided); per-OS command
+  risk classification (`classify_posix`/`classify_windows` pure + cfg `classify`)
+  across read-only/project-write/external-write/network/destructive/privileged/
+  unknown incl. PowerShell `Remove-Item -Recurse`, registry-as-privileged,
+  `sudo`/`doas`, `rm -rf`; permission engine + 3 profiles + `Approver` with the
+  `docs/07` class×interactivity table, untrusted-floor, and bypass that keeps the
+  workspace boundary. Verified: 18 tests — path-escape (incl. unix symlink /
+  windows root cfg-gated), classification (+adversarial proptest), per-class
+  decisions, secret reads prompt under default/relaxed, bypass denies
+  out-of-workspace + a harness-cannot-bypass test; clippy(-D)/fmt clean.
