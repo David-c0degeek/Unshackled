@@ -18,7 +18,6 @@ use unshackled_quota::{decide_resume, PausedRun, ResumeContext, ResumeDecision, 
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use unshackled_store::Store;
-use unshackled_tools::ToolRegistry;
 
 const DEFAULT_CONFIG: &str = "[harness]\n\
 mode = \"agent\"\n\
@@ -291,6 +290,8 @@ pub async fn resume(
     let rules = RuleEngine::with_baseline(&config.harness.rules);
     let test_command = config.harness.test_command.clone();
     let max_attempts = config.harness.attempts_per_step;
+    // Connect MCP servers once; each step builds a fresh registry over them.
+    let mcp = crate::mcp::McpTools::load(&config).await;
 
     const MAX_STEPS: usize = 100;
     for _ in 0..MAX_STEPS {
@@ -310,6 +311,7 @@ pub async fn resume(
             workspace.clone(),
             profile,
             model,
+            &mcp,
         );
         let outcome = resume_one_step(
             &mut runtime,
@@ -413,10 +415,11 @@ fn build_runtime(
     workspace: Workspace,
     profile: Profile,
     model: &str,
+    mcp: &crate::mcp::McpTools,
 ) -> SessionRuntime {
     SessionRuntime::new(
         provider,
-        ToolRegistry::with_builtins(),
+        mcp.registry(),
         PermissionEngine::new(profile, Vec::new()),
         Box::new(ScriptedApprover::new(Vec::new())),
         Store::open(root),

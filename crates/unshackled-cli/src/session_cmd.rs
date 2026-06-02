@@ -15,7 +15,6 @@ use unshackled_llm::ProviderRegistry;
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use unshackled_store::Store;
-use unshackled_tools::ToolRegistry;
 
 /// Map the `--permission` / `--bypass` flags to a permission profile. `--bypass`
 /// wins, and is never the default.
@@ -55,7 +54,7 @@ pub async fn print_mode(
 
     let runtime = SessionRuntime::new(
         provider,
-        ToolRegistry::with_builtins(),
+        crate::mcp::McpTools::load(&config).await.registry(),
         PermissionEngine::new(profile, Vec::new()),
         Box::new(ScriptedApprover::new(Vec::new())),
         Store::open(&cwd),

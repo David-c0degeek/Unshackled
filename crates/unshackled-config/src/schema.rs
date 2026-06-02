@@ -16,6 +16,7 @@ pub struct Config {
     pub harness: HarnessConfig,
     pub permissions: PermissionsConfig,
     pub quota: QuotaConfig,
+    pub mcp: McpConfig,
 }
 
 impl Default for Config {
@@ -26,8 +27,27 @@ impl Default for Config {
             harness: HarnessConfig::default(),
             permissions: PermissionsConfig::default(),
             quota: QuotaConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
+}
+
+/// Model Context Protocol servers to connect to. Each server's tools are exposed
+/// through the same permission engine and redaction as builtin tools.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpConfig {
+    pub servers: IndexMap<String, McpServerConfig>,
+}
+
+/// One MCP server launched as a local subprocess speaking JSON-RPC over stdio.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// The command to launch the server.
+    pub command: String,
+    /// Arguments passed to the command.
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// Which provider is active by default.

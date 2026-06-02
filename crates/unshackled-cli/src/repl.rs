@@ -25,7 +25,6 @@ use unshackled_sandbox::{
     Approver, Effect, Interactivity, PermissionEngine, PermissionRequest, Profile, Workspace,
 };
 use unshackled_store::Store;
-use unshackled_tools::ToolRegistry;
 use unshackled_tui::{
     handle_input, render, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
     Profile as UiProfile, UiEvent,
@@ -131,7 +130,7 @@ pub async fn run_chat(
     let (approval_tx, mut approval_rx) = mpsc::unbounded_channel::<ApprovalCall>();
     let mut runtime = SessionRuntime::new(
         provider,
-        ToolRegistry::with_builtins(),
+        crate::mcp::McpTools::load(&config).await.registry(),
         PermissionEngine::new(profile, Vec::new()),
         Box::new(TuiApprover { tx: approval_tx }),
         Store::open(&cwd),

@@ -181,6 +181,27 @@ fn resolve_model_is_none_without_a_configured_model() {
 }
 
 #[test]
+fn mcp_servers_parse_with_command_and_args() {
+    Jail::expect_with(|jail| {
+        let project = write(
+            jail,
+            "project.toml",
+            "[mcp.servers.files]\ncommand = \"my-mcp-server\"\nargs = [\"--root\", \".\"]\n",
+        )?;
+        let paths = ConfigPaths {
+            user: None,
+            project: Some(project),
+        };
+        let cfg = load(&paths, &CliOverrides::default())
+            .map_err(|e| figment::Error::from(e.to_string()))?;
+        let server = cfg.mcp.servers.get("files").expect("server present");
+        assert_eq!(server.command, "my-mcp-server");
+        assert_eq!(server.args, vec!["--root".to_string(), ".".to_string()]);
+        Ok(())
+    });
+}
+
+#[test]
 fn invalid_config_names_the_offending_key() {
     Jail::expect_with(|jail| {
         let project = write(
