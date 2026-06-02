@@ -11,6 +11,7 @@ use unshackled_store::Store;
 
 mod doctor;
 mod harness_cmd;
+mod mcp;
 mod memory_cmd;
 #[cfg(feature = "tui")]
 mod repl;

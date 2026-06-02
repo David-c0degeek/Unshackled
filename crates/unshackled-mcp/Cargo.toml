@@ -13,11 +13,11 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 unshackled-sandbox = { path = "../unshackled-sandbox" }
 unshackled-tools = { path = "../unshackled-tools" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true }
 unshackled-core = { path = "../unshackled-core" }
