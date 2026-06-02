@@ -10,10 +10,12 @@ mod brief;
 mod compaction;
 mod error;
 mod progress;
+mod rules;
 mod session;
 
 pub use brief::Brief;
 pub use compaction::{compact, estimate_tokens};
 pub use error::HarnessError;
 pub use progress::{Progress, Step};
+pub use rules::{Rule, RuleContext, RuleEngine, Trigger, Verdict};
 pub use session::{RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
