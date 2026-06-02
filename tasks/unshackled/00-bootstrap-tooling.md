@@ -73,6 +73,22 @@
       project-scoped. (Verified: settings file present; only read-only/safe
       commands allowlisted.)
 
+
+## Hindsight checkpoint
+> Run after all boxes in this subject are complete and before marking
+> the subject `DONE` in §5. Use the embedded prompt in `tasks/Unshackled-Plan.md`
+> "Appendix: Captain Hindsight Prompt". Record the review result here.
+>
+> Required output sections: Keep; Fix before closing; Record; Risk;
+> Verdict (`CLOSE` or `DO NOT CLOSE`). If the verdict is `DO NOT CLOSE`,
+> leave the subject open, add/reopen boxes or update decisions/lessons,
+> and rerun this checkpoint after the fixes.
+>
+> Subjects already marked `DONE` before this checkpoint was added still need
+> this section completed retroactively before the §7 gate review is ticked.
+
+- [ ] Captain Hindsight review recorded
+- [ ] Verdict is `CLOSE`
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
 > Append a `lessons.md` line here whenever a slice teaches something.

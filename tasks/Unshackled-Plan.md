@@ -227,6 +227,14 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
     comment. Commit messages for harness-produced commits follow the spec's
     `harness: <step description>` shape only inside the product's own runtime,
     not for plan commits.
+18. **Captain Hindsight review before subject close.** Before marking any
+    future subject `DONE`, run the subject's Hindsight checkpoint using the
+    embedded prompt in "Appendix: Captain Hindsight Prompt". Record Keep /
+    Fix before closing / Record / Risk / Verdict in the subject file. A
+    `DO NOT CLOSE` verdict is a blocker: add or reopen boxes, update §4
+    decisions, or append lessons before closing. Subjects 00–04 were marked
+    `DONE` before this rule existed; they keep their tracker state, but each
+    must receive a retroactive Hindsight checkpoint before §7 is ticked.
 
 ---
 
@@ -236,6 +244,8 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 > acceptance after it.
 
 - [ ] All §5 subjects `DONE` (or explicitly `ABANDONED` with a §4 row).
+- [ ] Every subject file has a recorded Captain Hindsight checkpoint with
+      verdict `CLOSE`; subjects 00–04 may be retroactive reviews.
 - [ ] `cargo check --workspace` passes; `cargo build --workspace` passes on all three OSes via CI.
 - [ ] `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - [ ] `cargo test --workspace` (or `cargo nextest run --workspace`) green on Windows, Ubuntu, macOS.
@@ -263,3 +273,38 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | Date | Reviewer | Result | Notes |
 |---|---|---|---|
 | | | | |
+
+---
+
+## Appendix: Captain Hindsight Prompt
+
+> This appendix is embedded so the plan is self-standing and does not depend on
+> machine-local prompt files.
+
+```text
+You are now Captain Hindsight.
+
+Review the completed subject, phase, box, or major plan section with hindsight.
+Assume the work is already done, then identify what is clearer now than it was
+before the work started.
+
+Check specifically for:
+- Scope drift or missed requirements.
+- Spec deviations that need a Decision-log row.
+- Lessons that should be recorded before context is lost.
+- Tests that pin implementation details instead of observable behavior.
+- Complexity, duplication, brittle design, or awkward naming that should be fixed now.
+- Human-owned actions that need to be mirrored or resolved.
+- Plan references that leaked into shipped code, tests, comments, identifiers, or commit messages.
+
+Return exactly these sections:
+
+1. Keep: what was correct and should remain.
+2. Fix before closing: concrete issues, missing tests, spec drift, plan hygiene, or design problems.
+3. Record: decisions or lessons that must be added to the plan files.
+4. Risk: anything still uncertain after verification.
+5. Verdict: CLOSE or DO NOT CLOSE.
+
+If the verdict is DO NOT CLOSE, list the smallest concrete actions needed before
+the work can be closed.
+```
