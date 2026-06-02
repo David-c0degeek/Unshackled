@@ -1,52 +1,22 @@
 //! Core domain types for Unshackled.
 //!
-//! This crate must stay provider-neutral and UI-neutral.
+//! This crate is the provider-neutral, UI-neutral heart of the workspace: the
+//! message and content model, normalized tool call/result types, usage
+//! accounting, strongly-typed identifiers, the secret wrapper, and the core
+//! error type. It must stay free of HTTP clients, terminal UI, and
+//! provider-specific names beyond generic enum variants.
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+mod error;
+mod id;
+mod message;
+mod secret;
+mod tool;
+mod usage;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SessionId(pub Uuid);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-    Tool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Message {
-    pub role: Role,
-    pub content: Vec<ContentBlock>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ContentBlock {
-    Text {
-        text: String,
-    },
-    Reasoning {
-        text: String,
-        signature: Option<String>,
-        provider_metadata: Option<serde_json::Value>,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        input_json: serde_json::Value,
-    },
-    ToolResult {
-        id: String,
-        output: String,
-        is_error: bool,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum UnshackledError {
-    #[error("{0}")]
-    Message(String),
-}
+pub use error::CoreError;
+pub use id::{MessageId, SessionId, ToolUseId, TurnId};
+pub use message::{ContentBlock, Message, MessageMetadata, Role};
+pub use secret::Secret;
+pub use tool::{ToolCall, ToolResult};
+pub use usage::{TokenUsage, UsageSummary};
