@@ -13,6 +13,9 @@ ignore = [
     # rustls-pemfile is unmaintained; pulled transitively via rustls. No known
     # vulnerability — an advisory of category "unmaintained" only.
     "RUSTSEC-2025-0134",
+    # paste is unmaintained; pulled transitively via ratatui. No known
+    # vulnerability — an "unmaintained" advisory only.
+    "RUSTSEC-2024-0436",
 ]
 
 [licenses]
@@ -29,6 +32,8 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "CDLA-Permissive-2.0",
+    # Zlib is a permissive license used by a ratatui transitive (e.g. foldhash).
+    "Zlib",
 ]
 
 [bans]
