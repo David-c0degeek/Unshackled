@@ -14,13 +14,13 @@
 ## Boxes
 > ID = `06.<box-number>`. Owners: agent · tech-lead.
 
-- [ ] **06.1** (agent) Define + implement the `brief.md` schema and a
+- [x] **06.1** (agent) Define + implement the `brief.md` schema and a
       parser/renderer (`docs/06`): required sections Summary, Requirements,
       Constraints, Non-Goals, Acceptance Criteria; lossless where possible;
       accept both `\n` and `\r\n` (`docs/13` §7). (Verified: `docs/08` Harness
       tests — parse valid brief; reject brief missing a required section, naming
       the section.)
-- [ ] **06.2** (agent) Define + implement the `PROGRESS.md` schema and
+- [x] **06.2** (agent) Define + implement the `PROGRESS.md` schema and
       parser/renderer (`docs/06`): `Branch:` line, numbered steps with `[ ]`/`[x]`,
       completed-step metadata (`commit:`, `attempts:`). User-edited files
       accepted if semantically valid; malformed files report exact section/line
@@ -143,3 +143,11 @@
 - [ ] Verdict is `CLOSE`
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 06.1, 06.2 · `brief.md` + `PROGRESS.md` document model in
+  `unshackled-harness`: section-based parsers that accept `\n`/`\r\n`, name a
+  missing required brief section, reject duplicate progress step numbers, and a
+  lossless render round-trip; `Progress` helpers (`next_incomplete`,
+  `completed_count`, `mark_complete`). Verified: 8 doc tests (valid parse, missing
+  section named, CRLF, duplicate-step rejection, render round-trips); clippy(-D)/
+  fmt clean.
