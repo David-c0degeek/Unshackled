@@ -12,29 +12,29 @@
 ## Boxes
 > ID = `02.<box-number>`. All agent-owned.
 
-- [ ] **02.1** (agent) Expand `unshackled-core` domain types with **newtypes**
+- [x] **02.1** (agent) Expand `unshackled-core` domain types with **newtypes**
       (`docs/13` §3): `SessionId`, `TurnId`, `ToolUseId` (and `MessageId` if
       needed) wrapping `Uuid`, each distinct so they cannot be confused.
       (Verified: unit test that the IDs are distinct types; `Debug` derived.)
-- [ ] **02.2** (agent) Complete the message/content model: `Message` with
+- [x] **02.2** (agent) Complete the message/content model: `Message` with
       `role`, `content: Vec<ContentBlock>`, and **metadata**; `ContentBlock`
       enum covering Text, Reasoning (text + optional signature + provider
       metadata, per `docs/04`), ToolUse, ToolResult. Mark growable public enums
       `#[non_exhaustive]`. (Verified: serde round-trip test for each variant.)
-- [ ] **02.3** (agent) Add normalized `ToolCall`/`ToolResult` model (id, name,
+- [x] **02.3** (agent) Add normalized `ToolCall`/`ToolResult` model (id, name,
       JSON input, result text, error flag) per `docs/02` §Tool Calls, decoupled
       from any provider format. (Verified: round-trip + error-flag test.)
-- [ ] **02.4** (agent) Add a usage-accounting model (input/output tokens, and
+- [x] **02.4** (agent) Add a usage-accounting model (input/output tokens, and
       room for tokens/sec + cost estimate the TUI footer needs, `docs/12`).
       (Verified: serde round-trip; arithmetic uses checked/saturating ops where
       it touches untrusted numbers, `docs/13` §12.)
-- [ ] **02.5** (agent) Add a structured error hierarchy: one `thiserror` enum
+- [x] **02.5** (agent) Add a structured error hierarchy: one `thiserror` enum
       per crate boundary (`docs/02` §Error Handling, `docs/13` §4). Replace the
       placeholder `UnshackledError::Message(String)` in core with a real typed
       `CoreError` (or remove it if core needs none). `#[non_exhaustive]`; sources
       via `#[from]`. (Verified: each enum compiles; no `anyhow` in a library
       public signature.)
-- [ ] **02.6** (agent) Add a **secret wrapper** type in `core` (or `config`)
+- [x] **02.6** (agent) Add a **secret wrapper** type in `core` (or `config`)
       whose `Debug`/`Display` prints `***`, raw value only via `expose()`
       (`docs/13` §8, `docs/07`). (Verified: test asserts `format!("{:?}")` and
       `Display` never contain the secret.)
@@ -101,3 +101,12 @@
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-02 · slice 1 · 02.1–02.6 · `unshackled-core` domain layer: distinct
+  newtype IDs (`SessionId`/`TurnId`/`MessageId` over `Uuid`; `ToolUseId` over the
+  provider-assigned String — see D008), full `Message`/`ContentBlock` model with
+  metadata + `#[non_exhaustive]`, normalized `ToolCall`/`ToolResult`, saturating
+  `TokenUsage`/`UsageSummary`, typed `CoreError`, and a `Secret` wrapper that
+  redacts `Debug`/`Display` and omits `Serialize`. Verified: 12 unit tests
+  (serde round-trips per variant, distinct IDs, secret never leaks); clippy
+  `-D warnings` + fmt clean.
