@@ -12,32 +12,32 @@
 ## Boxes
 > ID = `05.<box-number>`. All agent-owned.
 
-- [ ] **05.1** (agent) Implement the conversation **state machine** for one
+- [x] **05.1** (agent) Implement the conversation **state machine** for one
       turn (`docs/02` §Normal Chat Turn): build provider-neutral messages →
       expose allowed tool schemas → stream provider events → route tool calls
       through permission checks → append tool results → loop until `Done`.
       (Verified: integration test with the fake provider performing a file read
       then a final answer.)
-- [ ] **05.2** (agent) Stream model events into **UI-agnostic** runtime events
+- [x] **05.2** (agent) Stream model events into **UI-agnostic** runtime events
       (text deltas, reasoning deltas as metadata not final answer, tool calls,
       usage, warnings) consumed via a channel so the TUI (subject 08) and print
       mode share one event source (`docs/13` §5 channels: `broadcast`/`watch`).
       (Verified: event-stream test asserts reasoning is tagged metadata.)
-- [ ] **05.3** (agent) Execute tool calls via subject-04 registry + permission
+- [x] **05.3** (agent) Execute tool calls via subject-04 registry + permission
       engine; a denied/failed tool call is represented as **data** (tool result
       with `is_error`), never a crash (`docs/05` safety invariants). (Verified:
       denied-permission path returns a model-visible error result.)
-- [ ] **05.4** (agent) Persist the transcript through `unshackled-store` with
+- [x] **05.4** (agent) Persist the transcript through `unshackled-store` with
       redaction before persistence; the transcript is supporting context, not
       source of truth (ADR-0003, `docs/02`). (Verified: transcript written;
       redaction test.)
-- [ ] **05.5** (agent) Implement **cancellation** (`docs/13` §5,
+- [x] **05.5** (agent) Implement **cancellation** (`docs/13` §5,
       `tokio_util::CancellationToken`/`select!`): user interrupt or shutdown
       stops the stream and tool execution and leaves persisted state consistent
       (no half-written files/sessions). (Verified: `docs/08` Integration test —
       cancellation during streaming/tool execution leaves consistent persisted
       state.)
-- [ ] **05.6** (agent) Implement loop **limits**: max turns and max tool calls,
+- [x] **05.6** (agent) Implement loop **limits**: max turns and max tool calls,
       configurable, enforced deterministically. (Verified: limit tests — loop
       stops at the cap with a clear status.)
 - [ ] **05.7** (agent) Implement **print mode** (`docs/01` Interfaces): single
@@ -50,7 +50,7 @@
       footer (`docs/06` Mode and Permission Flags). Tools still pass through the
       permission engine in agent mode (`docs/01`). (Verified: flag-parsing tests;
       agent-mode loop runs with `default` profile prompting on risky actions.)
-- [ ] **05.9** (agent) Implement **context compaction** before overflow
+- [x] **05.9** (agent) Implement **context compaction** before overflow
       (`docs/03` Phase 8, `docs/08` Context): preserve tool-result pairing and,
       under harness mode, the current step contract. (Verified: `docs/08`
       Context tests — compaction preserves tool-result pairing; compaction
@@ -111,3 +111,14 @@
   complete a harness step). Verified: 8 tests — slash flood in/out of code,
   threshold loop, malformed-tool-call repair, exhausted-recovery degraded;
   clippy(-D)/fmt clean. (05.13 CLI/status surfacing lands with the session loop.)
+- 2026-06-02 · slice 2 · 05.1–05.6, 05.9 · `unshackled-harness` session runtime:
+  the shared agent-mode loop — build provider-neutral request, stream events,
+  route tool calls through the subject-04 permission-gated registry (denied/failed
+  = error result data), append + persist (redacted) each message, loop to `Done`.
+  UI-agnostic `RuntimeEvent` over a `broadcast` channel (reasoning tagged
+  metadata); `CancellationToken`/`select!` cancellation leaving a consistent
+  transcript; deterministic max-turns / max-tool-calls caps; context compaction
+  preserving tool-call/result pairing + leading system messages; recovery wired
+  (bad turn → ladder/repair, degraded → stop). Verified: 9 tests (read-then-answer
+  loop, reasoning-as-metadata, denied-tool data, redacted transcript, cancel
+  consistency, both caps, compaction pairing); clippy(-D)/fmt clean.
