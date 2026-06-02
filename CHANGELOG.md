@@ -43,6 +43,11 @@
   plus context-aware bad-output detection and a budgeted recovery ladder.
 - Added the `unshackled print` command for a non-interactive, single-prompt
   agent run that makes no workspace writes by default.
+- Added the `unshackled chat` interactive terminal REPL that drives the ratatui
+  UI: it maps key events into the UI core, runs a session turn per submission,
+  and streams the response into the transcript. Risky actions are denied by
+  default (use `--bypass` for a trusted run); a live approval modal is a
+  follow-up.
 - Added the harness core: lossless `brief.md` / `PROGRESS.md` documents, the
   `init`, `harness status`, `intake`, `plan`, `feature`, and `resume` commands,
   original intake and planner prompts, a deterministic rule engine with
