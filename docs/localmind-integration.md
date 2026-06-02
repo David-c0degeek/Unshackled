@@ -4,7 +4,7 @@
 > how Unshackled's learning surfaces evolve toward **LocalMind**, the extracted,
 > host-neutral local learning engine. It changes no shipped behavior in this
 > alpha and does not reopen completed work; it is the handoff that the next track
-> implements. See decision **D016**.
+> implements.
 
 ## Why
 
@@ -26,8 +26,8 @@ final learning system:
 - `unshackled-skills` — a skill manifest/loader plus disabled suggestion drafts
   with a per-pattern cooldown.
 
-Per D016, these should be **wrapped or replaced by LocalMind core through an
-adapter**, not expanded into a separate rich learning system.
+These should be **wrapped or replaced by LocalMind core through an adapter**, not
+expanded into a separate rich learning system.
 
 ## Ownership boundary
 
@@ -71,7 +71,5 @@ LocalMind never bypasses either.
 4. No separate install: `localmind-core` is bundled into the Unshackled binary.
 
 New rich-learning behavior (closeout, review, promotion, self-improvement) lands
-in LocalMind, not by expanding these crates — per plan principle "LocalMind owns
-rich learning behavior" and D016.
-
-References: D016; the LocalMind plan at `D:\repos\localmind\tasks\LocalMind-Plan.md`.
+in LocalMind, not by expanding these crates: learning is a host-neutral concern
+that LocalMind owns.
