@@ -345,8 +345,8 @@ pub async fn wait_resume(
         writeln!(out, "no paused run")?;
         return Ok(());
     };
-    let paused: PausedRun =
-        serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid paused-run file: {e}"))?;
+    let paused: PausedRun = serde_json::from_slice(&bytes)
+        .map_err(|e| anyhow::anyhow!("invalid paused-run file: {e}"))?;
 
     let config = unshackled_config::load(&ConfigPaths::standard(root), &CliOverrides::default())
         .unwrap_or_else(|_| Config::default());
@@ -372,7 +372,11 @@ pub async fn wait_resume(
             let eta = paused
                 .resume_eligible_unix
                 .map_or(0, |t| t.saturating_sub(now));
-            writeln!(out, "paused ({}); resume eligible in ~{eta}s", paused.reason)?;
+            writeln!(
+                out,
+                "paused ({}); resume eligible in ~{eta}s",
+                paused.reason
+            )?;
         }
         ResumeDecision::AskUser => {
             writeln!(

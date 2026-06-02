@@ -259,25 +259,25 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 > Run only when §5 is fully ticked. §7 is the engineering gate; §8 is human
 > acceptance after it.
 
-- [ ] All §5 subjects `DONE` (or explicitly `ABANDONED` with a §4 row).
-- [ ] Every subject file has a recorded Captain Hindsight checkpoint with
+- [x] All §5 subjects `DONE` (or explicitly `ABANDONED` with a §4 row).
+- [x] Every subject file has a recorded Captain Hindsight checkpoint with
       verdict `CLOSE`; subjects 00–04 may be retroactive reviews.
-- [ ] `cargo check --workspace` passes; `cargo build --workspace` passes on all three OSes via CI.
-- [ ] `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
-- [ ] `cargo test --workspace` (or `cargo nextest run --workspace`) green on Windows, Ubuntu, macOS.
-- [ ] `cargo deny check` and `cargo audit` pass; `cargo machete` reports no unused deps.
-- [ ] All `docs/08` "Required MVP Tests" exist and pass (config, provider, tools, harness, recovery, context, store).
-- [ ] Golden-task eval suite runs and reports a task success rate; scorecard fields recorded.
-- [ ] §6 cross-cutting principles reviewed; no `unwrap`/`expect`/`panic!` on library runtime paths; no `anyhow` leaking from a library; no secret reachable via `Debug`/logs; no lock held across `.await`.
-- [ ] Behavior parity verified across the three tier-1 platforms (ADR-0007); `#[cfg]` branches tested on their OS.
-- [ ] **Clean-room audit** (`docs/00`, `docs/09`): text scan for prohibited framing terms ("source-map", "leaked", "free build", "fork of", "private endpoint", vendor names as identity, browser-cookie auth); no private/undocumented endpoint adapter; prompts/tests/identifiers original; provenance notes present where the reference was consulted.
-- [ ] **Personal-absolute-path scan** scoped to shipped artifacts: scan `crates/`, install scripts, and public docs for personal absolute paths and assert zero hits. **Exclude** `tasks/` (disposable, deleted at go-live) and the single documented read-only-reference path `D:\repos\unshackled` in `AGENTS.md`, which ADR-0005 / `docs/00` explicitly allow. A hit anywhere a user would receive it (binary, archive, shipped doc) is a blocker; the documented reference mention is not.
-- [ ] Shipped artefacts plan-agnostic — grep the repo **excluding `tasks/`** for box IDs (`\b\d\d\.\d+\b`), decision IDs (`\bD\d{3}\b`), `tasks/unshackled/`, `Unshackled-Plan.md`, `\bslices?\b`; zero hits after triage (version strings can match box-ID pattern).
-- [ ] Commit messages plan-agnostic — `git log <base>..HEAD` mentions no box IDs, `D###`, `tasks/unshackled/`, `Unshackled-Plan.md`, or `slice`/`slices` (same triage).
-- [ ] `tasks/unshackled/manual-actions.md` — every human-owned box resolved or explicitly deferred with rationale.
+- [x] `cargo check --workspace` passes; `cargo build --workspace` passes on all three OSes via CI.
+- [x] `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- [x] `cargo test --workspace` (or `cargo nextest run --workspace`) green on Windows, Ubuntu, macOS.
+- [x] `cargo deny check` and `cargo audit` pass; `cargo machete` reports no unused deps.
+- [x] All `docs/08` "Required MVP Tests" exist and pass (config, provider, tools, harness, recovery, context, store).
+- [x] Golden-task eval suite runs and reports a task success rate; scorecard fields recorded.
+- [x] §6 cross-cutting principles reviewed; no `unwrap`/`expect`/`panic!` on library runtime paths; no `anyhow` leaking from a library; no secret reachable via `Debug`/logs; no lock held across `.await`.
+- [x] Behavior parity verified across the three tier-1 platforms (ADR-0007); `#[cfg]` branches tested on their OS.
+- [x] **Clean-room audit** (`docs/00`, `docs/09`): text scan for prohibited framing terms ("source-map", "leaked", "free build", "fork of", "private endpoint", vendor names as identity, browser-cookie auth); no private/undocumented endpoint adapter; prompts/tests/identifiers original; provenance notes present where the reference was consulted.
+- [x] **Personal-absolute-path scan** scoped to shipped artifacts: scan `crates/`, install scripts, and public docs for personal absolute paths and assert zero hits. **Exclude** `tasks/` (disposable, deleted at go-live) and the single documented read-only-reference path `D:\repos\unshackled` in `AGENTS.md`, which ADR-0005 / `docs/00` explicitly allow. A hit anywhere a user would receive it (binary, archive, shipped doc) is a blocker; the documented reference mention is not.
+- [x] Shipped artefacts plan-agnostic — grep the repo **excluding `tasks/`** for box IDs (`\b\d\d\.\d+\b`), decision IDs (`\bD\d{3}\b`), `tasks/unshackled/`, `Unshackled-Plan.md`, `\bslices?\b`; zero hits after triage (version strings can match box-ID pattern).
+- [x] Commit messages plan-agnostic — `git log <base>..HEAD` mentions no box IDs, `D###`, `tasks/unshackled/`, `Unshackled-Plan.md`, or `slice`/`slices` (same triage). Implementation commits clean; the only `slice` hits are the pre-implementation plan-doc commits that form `<base>`.
+- [x] `tasks/unshackled/manual-actions.md` — every human-owned box resolved or explicitly deferred with rationale. (03.14 live-provider creds DEFERRED to the release validation run.)
 - [ ] `docs/09` Public-Alpha Criteria met: clean-room audit complete, no private endpoints, no prohibited framing, tests green, TUI usable, harness completes a small repo task, docs explain provider setup, security model documented; installers build; release archives contain license files.
 - [x] LocalMind-native learning posture recorded before release: current memory/skills are documented as alpha bridge surfaces, and a checked-in follow-up integration plan/contract exists for replacing/wrapping them with LocalMind core while keeping the feature built into Unshackled. (`docs/localmind-integration.md`, D016.)
-- [ ] `tasks/unshackled/lessons.md` reconciled; lasting lessons migrated to permanent `tasks/lessons.md` (create if missing) before `tasks/unshackled/` is deleted.
+- [x] `tasks/unshackled/lessons.md` reconciled; lasting lessons migrated to permanent `tasks/lessons.md` (create if missing) before `tasks/unshackled/` is deleted.
 - [ ] Plan handed to reviewer for §8 sign-off.
 
 ---
