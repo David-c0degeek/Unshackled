@@ -1,0 +1,54 @@
+# Configuring a provider
+
+Unshackled is provider-neutral. It talks to models through official public APIs
+and local OpenAI-compatible servers; it never uses private or undocumented
+endpoints. Providers are configured in `.unshackled.toml`.
+
+## A local OpenAI-compatible server
+
+Works with any local server that speaks the OpenAI Chat Completions API (for
+example Ollama, vLLM, llama.cpp's server, or a local gateway).
+
+```toml
+[provider]
+default = "local"
+
+[providers.local]
+kind = "openai-compatible"
+base_url = "http://localhost:11434/v1"
+# Optional, only if your gateway requires a key:
+api_key_env = "UNSHACKLED_LOCAL_API_KEY"
+```
+
+TLS is not required for `localhost`.
+
+## The official OpenAI API
+
+Uses the documented OpenAI API and its API-key authentication.
+
+```toml
+[providers.openai]
+kind = "openai"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Then set the key in your environment (never commit it):
+
+```sh
+export OPENAI_API_KEY=sk-...        # Linux / macOS
+$env:OPENAI_API_KEY = "sk-..."      # Windows PowerShell
+```
+
+Credentials are read from the named environment variable at use and wrapped so
+they never appear in logs, transcripts, or error output. The config file only
+records the *name* of the variable, never the secret.
+
+## Verifying
+
+```sh
+unshackled doctor                       # shows which credentials are present
+unshackled ask --model <name> "hello"   # one-shot streamed completion
+```
+
+Provider names appear here only as compatibility statements. Unshackled is a
+provider-neutral harness, not a vendor product.
