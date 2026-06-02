@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  archives:
+    name: archive (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.82"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p unshackled
+      # Stage the binary alongside the license files so every archive ships them.
+      - name: stage (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist/unshackled
+          cp target/release/unshackled dist/unshackled/
+          cp LICENSE-MIT README.md CHANGELOG.md dist/unshackled/
+          tar -C dist -czf unshackled-${{ matrix.target }}.tar.gz unshackled
+      - name: stage (windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force dist/unshackled | Out-Null
+          Copy-Item target/release/unshackled.exe dist/unshackled/
+          Copy-Item LICENSE-MIT, README.md, CHANGELOG.md dist/unshackled/
+          Compress-Archive -Path dist/unshackled/* -DestinationPath unshackled-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unshackled-${{ matrix.target }}
+          path: unshackled-${{ matrix.target }}.${{ matrix.ext }}

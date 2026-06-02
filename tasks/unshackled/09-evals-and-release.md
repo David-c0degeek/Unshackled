@@ -12,51 +12,51 @@
 ## Boxes
 > ID = `09.<box-number>`. Owners: agent · release-engineer · tech-lead.
 
-- [ ] **09.1** (agent) Define the golden-task **fixture format** (`docs/08`,
+- [x] **09.1** (agent) Define the golden-task **fixture format** (`docs/08`,
       `docs/11`): small deterministic repos with expected outcomes. Fixtures
       authored for this repo, never copied (`docs/08` Fixture Policy). Tasks:
       create a tiny CLI; add a parser branch; fix a failing test; edit docs +
       code together; recover from a bad tool result; pause/resume after a fake
       quota window. (Verified: fixture schema + at least these six tasks exist.)
-- [ ] **09.2** (agent) Implement the fake-provider **eval runner** + scorecard
+- [x] **09.2** (agent) Implement the fake-provider **eval runner** + scorecard
       recording per task: success/failure, model turns, tool calls,
       retries/recoveries, token usage, final git diff, test output (`docs/08`,
       `docs/03` Phase 8 Done-when). Track the success rate over time. (Verified:
       runner executes the six tasks with the fake provider and emits a
       scorecard; a regression in any task shows as a score drop.)
-- [ ] **09.3** (agent) Add an **optional live-provider eval mode** behind
+- [x] **09.3** (agent) Add an **optional live-provider eval mode** behind
       `UNSHACKLED_LIVE_TESTS`, skipping without credentials, never in default CI,
       avoiding destructive tools, prompts minimal (`docs/08` Live Tests,
       `docs/11` Evals). (Verified: live mode gated by env var; skips cleanly when
       unset.)
-- [ ] **09.4** (agent) Sweep the `docs/08` "Required MVP Tests" matrix and
+- [x] **09.4** (agent) Sweep the `docs/08` "Required MVP Tests" matrix and
       confirm every listed test exists and passes across crates (Config,
       Provider, Tools, Harness, Recovery, Context, Store). Fill any gaps found.
       (Verified: a checklist mapping each `docs/08` MVP test to a real test name;
       `cargo nextest run --workspace` green on all three OSes.)
-- [ ] **09.5** (agent) Verify **behavior parity** across Windows, Linux, macOS
+- [x] **09.5** (agent) Verify **behavior parity** across Windows, Linux, macOS
       (ADR-0007, `docs/01` release requirement): every `#[cfg]` branch has a test
       that runs on its OS; CI matrix green on all three. Run `/verify`/`/run`
       against `unshackled doctor` and the Milestone-1 harness commands on at
       least the host platform. (Verified: CI green ×3; a manual run log of the
       Milestone-1 command sequence.)
-- [ ] **09.6** (agent) Promote the supply-chain CI jobs to **blocking** and run
+- [x] **09.6** (agent) Promote the supply-chain CI jobs to **blocking** and run
       them clean: `cargo deny check`, `cargo audit`, `cargo machete` (`docs/14`
       §4, `docs/07` Supply Chain, `docs/09`). Dependency license review against
       `deny.toml`. (Verified: CI fails on an advisory/unused-dep/forbidden
       license; current tree passes.)
-- [ ] **09.7** (agent) Add the **installers** (`docs/09` Installer Targets V1):
+- [x] **09.7** (agent) Add the **installers** (`docs/09` Installer Targets V1):
       `cargo install` path, GitHub release archives, a PowerShell install script,
       and a shell install script. Release archives include the license files
       (`docs/09` Release Checklist). (Verified: archive build contains the binary
       + `LICENSE-MIT`; install scripts parse/lint clean.)
-- [ ] **09.8** (agent) Write/refresh **public docs** for alpha (`docs/09`
+- [x] **09.8** (agent) Write/refresh **public docs** for alpha (`docs/09`
       Public-Alpha Criteria): install docs, provider setup (official API + local
       server config from `docs/04`), security-model summary, and an alpha release
       notes draft. Keep all framing clean-room-compliant (`docs/00` Prohibited
       Framing, `docs/09` Clean-Room Scan Terms). Update `CHANGELOG.md`. (Verified:
       docs render; a draft `docs` set covers install + provider setup + security.)
-- [ ] **09.9** (agent) Run the **clean-room scan** (`docs/00` Repository Hygiene,
+- [x] **09.9** (agent) Run the **clean-room scan** (`docs/00` Repository Hygiene,
       `docs/09` Clean-Room Scan Terms): text scan for prohibited framing
       ("source-map", "leaked", "free build", "fork of", "private endpoint",
       vendor names as identity, personal absolute paths, browser-cookie auth);
