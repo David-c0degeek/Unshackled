@@ -27,11 +27,11 @@
       (`docs/03` Phase 5 Done-when). (Verified: `docs/08` Harness tests — parse
       valid progress; reject duplicate step number; round-trip render is
       lossless.)
-- [ ] **06.3** (agent) Implement `unshackled init` (`docs/06`): create
+- [x] **06.3** (agent) Implement `unshackled init` (`docs/06`): create
       `.unshackled.toml`, add `.gitignore` entry for `.unshackled/`, optionally
       init git. (Verified: `assert_cmd` test on a temp dir — files created,
       gitignore entry present.)
-- [ ] **06.4** (agent) Implement `unshackled harness status` (`docs/06`):
+- [x] **06.4** (agent) Implement `unshackled harness status` (`docs/06`):
       read-only summary — current branch, next step, completed count, dirty
       state, test command, provider config status — and it MUST work without a
       model provider (`docs/03` Phase 5 Done-when). (Verified: snapshot test of
