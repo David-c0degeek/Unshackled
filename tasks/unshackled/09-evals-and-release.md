@@ -77,7 +77,7 @@
       content, verify archives contain expected files, create a signed tag if
       signing is configured. Mirror to `manual-actions.md`. (Verified: checklist
       completed with each item ticked.)
-- [ ] **09.12** (release-engineer) Confirm the `docs/09` **Public-Alpha
+- [x] **09.12** (release-engineer) Confirm the `docs/09` **Public-Alpha
       Criteria** all hold and tag **`v0.1.0-alpha.1`** (`docs/11` Release):
       clean-room audit complete, no private endpoints, no prohibited framing,
       `cargo test --workspace` green, TUI usable, harness completes a small repo
@@ -88,7 +88,7 @@
       main (`docs/09` Release Channels) — no stability guarantee — so post-alpha
       iteration has a pipeline. (Verified: a nightly workflow builds main
       artifacts.)
-- [ ] **09.14** (agent) Add the **LocalMind-native integration handoff** for the
+- [x] **09.14** (agent) Add the **LocalMind-native integration handoff** for the
       next development track: document that Unshackled ships learning as built-in
       UX, mark current `unshackled-memory` / `unshackled-skills` behavior as
       alpha bridge surfaces, and create/check in the follow-up contract or plan
@@ -136,8 +136,8 @@
    rather than the literal six; the framework is data-driven and the remaining
    recover-from-bad-tool-result and quota-pause/resume scenarios are covered by the
    recovery and quota engine tests. The full 3-OS green matrix is unverified locally.
-5. **Verdict:** CLOSE (engineering scope). The single open item is the human alpha
-   tag (09.12), tracked in `manual-actions.md`.
+5. **Verdict:** CLOSE. The alpha
+   tag v0.1.0-alpha.1 was created and pushed on owner authorization (09.12 DONE).
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
@@ -152,3 +152,11 @@
   agent-side complete; 09.12 alpha tag DEFERRED (human go-live); 09.13 nightly
   added. Verified: evals 3/3 real tasks pass + control fails; deny/audit/machete
   green; per-crate suites green.
+- 2026-06-02 · slice 2 · 09.12, 09.14 · Tagged `v0.1.0-alpha.1` (annotated) on
+  `main` `4a68875` and pushed on owner authorization (triggers `release.yml`).
+  Added the forward LocalMind integration contract (`docs/localmind-integration.md`,
+  D016): documents learning as built-in UX, marks `unshackled-memory`/
+  `unshackled-skills` as alpha bridge surfaces, and maps Unshackled signals
+  (session bundles, tool events, diffs, tests, commits, recovery events, memory
+  retrieval, review queue, skill drafts) onto the host-neutral LocalMind core via a
+  future adapter — no separate install, no subject 05-08 history rewritten.

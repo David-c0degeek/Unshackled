@@ -151,11 +151,10 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 | [x] | 06 | `tasks/unshackled/06-harness-core.md` | DONE | agent: 17; tech-lead: 1 | yes |
 | [x] | 07 | `tasks/unshackled/07-extensions.md` | DONE | agent: 15; tech-lead: 1 | yes |
 | [x] | 08 | `tasks/unshackled/08-terminal-ui.md` | DONE | agent: 11 | n/a |
-| [x] | 09 | `tasks/unshackled/09-evals-and-release.md` | DONE* | agent: 10; release-engineer: 3; tech-lead: 1 | yes |
+| [x] | 09 | `tasks/unshackled/09-evals-and-release.md` | DONE | agent: 10; release-engineer: 3; tech-lead: 1 | yes |
 
-> *DONE except 09.12 — the public `v0.1.0-alpha.1` tag — which is DEFERRED as a
-> human go-live action (outward-facing release), tracked in `manual-actions.md`.
-> All engineering and release-prep work is complete and on `main`.
+> All boxes complete. `v0.1.0-alpha.1` tagged on `main` (`4a68875`) and pushed on
+> owner authorization, triggering `release.yml`. §8 acceptance is the human gate.
 
 ---
 
@@ -277,7 +276,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 - [ ] Commit messages plan-agnostic — `git log <base>..HEAD` mentions no box IDs, `D###`, `tasks/unshackled/`, `Unshackled-Plan.md`, or `slice`/`slices` (same triage).
 - [ ] `tasks/unshackled/manual-actions.md` — every human-owned box resolved or explicitly deferred with rationale.
 - [ ] `docs/09` Public-Alpha Criteria met: clean-room audit complete, no private endpoints, no prohibited framing, tests green, TUI usable, harness completes a small repo task, docs explain provider setup, security model documented; installers build; release archives contain license files.
-- [ ] LocalMind-native learning posture recorded before release: current memory/skills are documented as alpha bridge surfaces, and a checked-in follow-up integration plan/contract exists for replacing/wrapping them with LocalMind core while keeping the feature built into Unshackled.
+- [x] LocalMind-native learning posture recorded before release: current memory/skills are documented as alpha bridge surfaces, and a checked-in follow-up integration plan/contract exists for replacing/wrapping them with LocalMind core while keeping the feature built into Unshackled. (`docs/localmind-integration.md`, D016.)
 - [ ] `tasks/unshackled/lessons.md` reconciled; lasting lessons migrated to permanent `tasks/lessons.md` (create if missing) before `tasks/unshackled/` is deleted.
 - [ ] Plan handed to reviewer for §8 sign-off.
 
