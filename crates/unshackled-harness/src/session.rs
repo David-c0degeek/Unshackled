@@ -51,6 +51,9 @@ pub enum RuntimeEvent {
     Usage(TokenUsage),
     /// A provider warning.
     Warning(String),
+    /// The provider rate-limited or exhausted quota; carries a human-readable
+    /// description of when a retry is eligible, for the UI.
+    QuotaPaused { reset: String },
     /// A recovery event occurred; model health is attached.
     Recovery { health: ModelHealth },
     /// The loop stopped.
@@ -205,6 +208,9 @@ impl SessionRuntime {
                 Ok(stream) => stream,
                 Err(err) => {
                     self.last_quota = err.quota().cloned();
+                    if let Some(reset) = self.last_quota.as_ref().map(quota_reset_label) {
+                        let _ = events.send(RuntimeEvent::QuotaPaused { reset });
+                    }
                     let _ = events.send(RuntimeEvent::Warning(err.to_string()));
                     return self.stop(events, StopReason::ProviderError);
                 }
@@ -341,5 +347,19 @@ impl SessionRuntime {
             // store and again here for defense in depth.
             let _ = self.store.put_tool_output(&key, &redact(&json));
         }
+    }
+}
+
+/// A short, human-readable description of when a rate-limited request becomes
+/// eligible to retry, from the most specific metadata the provider supplied.
+fn quota_reset_label(quota: &QuotaInfo) -> String {
+    if let Some(retry_after) = quota.retry_after {
+        format!("retry in ~{}s", retry_after.as_secs())
+    } else if let Some(reset_at) = quota.reset_at {
+        format!("resets at {reset_at}")
+    } else if let Some(kind) = &quota.limit_kind {
+        format!("{kind} limit reached")
+    } else {
+        "rate limited".to_string()
     }
 }
