@@ -6,7 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 use unshackled_tui::{
     handle_input, render, run, AppInput, AppState, ApprovalRequest, Header, Key, Mode, Picker,
-    Profile, ThinkingPanel, TranscriptLine, UiEvent,
+    Profile, ThinkingPanel, TranscriptLine, TrustPrompt, UiEvent,
 };
 
 fn header() -> Header {
@@ -93,6 +93,17 @@ fn approval_modal_snapshot() {
         risk_class: "destructive".to_string(),
     });
     insta::assert_snapshot!(render_string(&state, 90, 18));
+}
+
+#[test]
+fn trust_modal_shows_the_full_workspace_path() {
+    let mut state = base();
+    state.trust = Some(TrustPrompt {
+        path: r"D:\repos\rust\unshackled".to_string(),
+    });
+    let rendered = render_string(&state, 90, 18);
+    assert!(rendered.contains(r"D:\repos\rust\unshackled"));
+    assert!(rendered.contains("trust this folder?"));
 }
 
 #[test]

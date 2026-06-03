@@ -51,6 +51,7 @@ unshackled-tui = { path = "../unshackled-tui", optional = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
+crossterm = { workspace = true }
 insta = { workspace = true }
 tempfile = { workspace = true }
 wiremock = { workspace = true }

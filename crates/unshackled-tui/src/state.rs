@@ -178,8 +178,8 @@ impl AppState {
     /// Collapse a pasted block to a short placeholder, stashing the full text to
     /// be restored on submit. Returns the placeholder to insert into the input.
     pub fn register_paste(&mut self, content: String) -> String {
-        let lines = content.lines().count().max(1);
-        let placeholder = format!("[pasted #{} · {lines} lines]", self.pastes.len() + 1);
+        let rows = content.split('\n').count().max(1);
+        let placeholder = format!("[{rows} pasted rows #{}]", self.pastes.len() + 1);
         self.pastes.push(Paste {
             placeholder: placeholder.clone(),
             content,
@@ -319,7 +319,7 @@ mod tests {
         let body = "line one\nline two\nline three\nline four".to_string();
         let placeholder = state.register_paste(body.clone());
         assert!(placeholder.contains("#1"));
-        assert!(placeholder.contains("4 lines"));
+        assert!(placeholder.contains("4 pasted rows"));
 
         state.input = format!("see this {placeholder} please");
         let expanded = state.take_input_expanded();
@@ -344,6 +344,8 @@ mod tests {
         let mut state = state();
         let first = state.register_paste("a\nb".into());
         let second = state.register_paste("c\nd".into());
+        assert!(first.contains("2 pasted rows"));
+        assert!(second.contains("2 pasted rows"));
         assert!(first.contains("#1"));
         assert!(second.contains("#2"));
     }
