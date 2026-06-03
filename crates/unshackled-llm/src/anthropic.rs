@@ -229,9 +229,25 @@ fn translate_messages(messages: &[Message]) -> (String, Vec<Value>) {
 
     let messages = turns
         .into_iter()
-        .map(|(role, content)| json!({ "role": role, "content": content }))
+        .map(|(role, content)| json!({ "role": role, "content": anthropic_content(content) }))
         .collect();
     (system, messages)
+}
+
+fn anthropic_content(blocks: Vec<Value>) -> Value {
+    let mut text_parts = Vec::new();
+    for block in &blocks {
+        let Some(text) = block
+            .as_object()
+            .filter(|obj| obj.get("type").and_then(Value::as_str) == Some("text"))
+            .and_then(|obj| obj.get("text"))
+            .and_then(Value::as_str)
+        else {
+            return Value::Array(blocks);
+        };
+        text_parts.push(text);
+    }
+    json!(text_parts.join("\n"))
 }
 
 fn translate_blocks(message: &Message) -> Vec<Value> {
@@ -708,6 +724,23 @@ mod tests {
         // The system message is not duplicated into the messages array.
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
         assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn text_only_turns_use_string_content() {
+        let provider = AnthropicProvider::new(
+            "anthropic",
+            "Anthropic",
+            "https://api.anthropic.com/v1",
+            None,
+        );
+        let messages = vec![
+            Message::text(Role::User, "first"),
+            Message::text(Role::User, "second"),
+        ];
+        let body = provider.build_body(&ModelRequest::new("claude", messages));
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "first\nsecond");
     }
 
     #[test]
