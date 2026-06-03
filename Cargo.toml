@@ -14,7 +14,12 @@ members = [
     "crates/unshackled-skills",
     "crates/unshackled-recovery",
     "crates/unshackled-quota",
+    "crates/unshackled-localmind",
 ]
+# The LocalMind engine is vendored as a git submodule and consumed by
+# unshackled-localmind via path dependencies. It is its own workspace, so it is
+# excluded from this one.
+exclude = ["external/localmind"]
 resolver = "2"
 
 [workspace.package]

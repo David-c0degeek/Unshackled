@@ -59,16 +59,35 @@ expanded into a separate rich learning system.
 All capture stays redacted-before-persistence and inside the permission boundary;
 LocalMind never bypasses either.
 
-## Migration shape (next track, not this alpha)
+## How LocalMind is bundled
 
-1. Add a host-neutral `localmind-core` (its own repo/crate) implementing the core
-   above; it depends on nothing from Unshackled.
-2. Add an `unshackled-localmind` adapter that feeds the signals in the table into
-   `localmind-core` and renders its review queue / memory in the existing TUI and
-   `memory` / `skill` commands.
+LocalMind is its own repository, vendored here as a git **submodule** at
+`external/localmind` (pinned to a commit). The `unshackled-localmind` adapter
+depends on the submodule's `localmind-core` and `localmind-store` crates by path,
+so a single `cargo build` compiles everything into the Unshackled binary — no
+separate install. LocalMind stays standalone and upstream; bumping the submodule
+pointer pulls in new versions.
+
+Working with the submodule:
+
+```sh
+git clone --recurse-submodules <repo>      # or, in an existing clone:
+git submodule update --init --recursive
+```
+
+CI checks out submodules recursively. The adapter is a one-way edge: Unshackled
+depends on LocalMind, never the reverse.
+
+## Migration shape
+
+1. **Done — closeout.** `unshackled-localmind::closeout_session` maps an
+   Unshackled session transcript into LocalMind, runs summary + candidate-lesson
+   extraction, and enqueues candidates for review.
+2. Surface LocalMind's review queue / memory through the existing TUI and the
+   `memory` / `skill` commands; inject retrieved context before agent turns.
 3. Reduce `unshackled-memory` / `unshackled-skills` to thin shims over the adapter
    (or remove them) once parity is reached — keeping the feature built-in.
-4. No separate install: `localmind-core` is bundled into the Unshackled binary.
+4. No separate install: the LocalMind crates are bundled into the binary.
 
 New rich-learning behavior (closeout, review, promotion, self-improvement) lands
 in LocalMind, not by expanding these crates: learning is a host-neutral concern
