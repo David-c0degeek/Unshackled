@@ -83,11 +83,24 @@ depends on LocalMind, never the reverse.
 1. **Done — closeout.** `unshackled-localmind::closeout_session` maps an
    Unshackled session transcript into LocalMind, runs summary + candidate-lesson
    extraction, and enqueues candidates for review.
-2. Surface LocalMind's review queue / memory through the existing TUI and the
-   `memory` / `skill` commands; inject retrieved context before agent turns.
-3. Reduce `unshackled-memory` / `unshackled-skills` to thin shims over the adapter
+2. **Done — CLI surface.** `unshackled learning` (behind the `learning` feature)
+   exposes the loop: `closeout`, `review {list,show,accept,reject,defer,edit}`,
+   `promote`, `search`, `audit`. State is project-local under `.localmind/`.
+3. Inject retrieved context before agent turns; auto-trigger closeout at session
+   end.
+4. Reduce `unshackled-memory` / `unshackled-skills` to thin shims over the adapter
    (or remove them) once parity is reached — keeping the feature built-in.
-4. No separate install: the LocalMind crates are bundled into the binary.
+5. No separate install: the LocalMind crates are bundled into the binary.
+
+```sh
+# Build with the learning subsystem (release builds enable it):
+cargo build -p unshackled --features learning
+unshackled learning closeout --session <id>   # extract + enqueue lessons
+unshackled learning review list               # inspect the queue
+unshackled learning review accept <item-id>   # accept / reject / defer / edit
+unshackled learning promote <item-id>         # promote to durable memory
+unshackled learning search "<query>"          # search accepted memory
+```
 
 New rich-learning behavior (closeout, review, promotion, self-improvement) lands
 in LocalMind, not by expanding these crates: learning is a host-neutral concern

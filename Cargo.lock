@@ -2473,6 +2473,7 @@ dependencies = [
  "unshackled-core",
  "unshackled-harness",
  "unshackled-llm",
+ "unshackled-localmind",
  "unshackled-mcp",
  "unshackled-memory",
  "unshackled-quota",

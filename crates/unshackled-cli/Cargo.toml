@@ -18,6 +18,10 @@ path = "src/main.rs"
 # runs on every toolchain. Release and CI builds enable it.
 default = []
 tui = ["dep:crossterm", "dep:ratatui", "dep:unshackled-tui"]
+# The LocalMind learning subsystem (session closeout, review queue, memory).
+# Opt-in: it links the vendored LocalMind crates (and SQLite). Release builds
+# enable it.
+learning = ["dep:unshackled-localmind"]
 
 [dependencies]
 anyhow.workspace = true
@@ -33,6 +37,7 @@ unshackled-config = { path = "../unshackled-config" }
 unshackled-core = { path = "../unshackled-core" }
 unshackled-harness = { path = "../unshackled-harness" }
 unshackled-llm = { path = "../unshackled-llm" }
+unshackled-localmind = { path = "../unshackled-localmind", optional = true }
 unshackled-mcp = { path = "../unshackled-mcp" }
 unshackled-memory = { path = "../unshackled-memory" }
 unshackled-quota = { path = "../unshackled-quota" }
