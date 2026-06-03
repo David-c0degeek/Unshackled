@@ -253,7 +253,10 @@ impl SessionRuntime {
                         }
                         Some(Ok(ModelEvent::Done)) => break,
                         Some(Ok(_)) => {}
-                        Some(Err(_)) => {
+                        Some(Err(err)) => {
+                            self.last_quota = err.quota().cloned();
+                            let _ = events
+                                .send(RuntimeEvent::Warning(format!("stream error: {err}")));
                             stream_failed = true;
                             break;
                         }

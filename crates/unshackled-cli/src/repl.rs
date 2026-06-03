@@ -11,7 +11,10 @@ use std::io::{self, Stdout};
 use std::pin::Pin;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers,
+};
 use crossterm::{execute, terminal};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -187,17 +190,28 @@ async fn event_loop(
         }
 
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if is_submit(key, &state.input) {
-                    let prompt = std::mem::take(&mut state.input);
-                    // Seed relevant accepted memory for this prompt (no-op without
-                    // the learning feature or when nothing matches).
-                    crate::context_inject::seed(cwd, runtime, &prompt);
-                    state.apply(UiEvent::UserMessage(prompt.clone()));
-                    run_turn(terminal, state, runtime, approval_rx, &prompt).await?;
-                } else if let Some(mapped) = map_key(key) {
-                    handle_input(state, AppInput::Key(mapped));
+            match event::read()? {
+                // Only key *presses*: Windows consoles also emit Release/Repeat
+                // events, which would otherwise double every character.
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if is_submit(key, &state.input) {
+                        let prompt = std::mem::take(&mut state.input);
+                        // Seed relevant accepted memory for this prompt (no-op
+                        // without the learning feature or when nothing matches).
+                        crate::context_inject::seed(cwd, runtime, &prompt);
+                        state.apply(UiEvent::UserMessage(prompt.clone()));
+                        state.busy = true;
+                        let outcome =
+                            run_turn(terminal, state, runtime, approval_rx, &prompt).await;
+                        state.busy = false;
+                        outcome?;
+                    } else if let Some(mapped) = map_key(key) {
+                        handle_input(state, AppInput::Key(mapped));
+                    }
                 }
+                // Bracketed paste: insert the pasted text into the input.
+                Event::Paste(text) => state.input.push_str(&text),
+                _ => {}
             }
         }
     }
@@ -223,6 +237,13 @@ async fn run_turn(
         terminal.draw(|frame| render(frame, state))?;
         tokio::select! {
             _ = &mut turn => {
+                // Drain any events still buffered so a fast response is not lost
+                // when the turn future completes in the same poll.
+                while let Ok(event) = rx.try_recv() {
+                    if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
+                        state.apply(ui);
+                    }
+                }
                 state.apply(UiEvent::TurnComplete);
                 break;
             }
@@ -237,12 +258,16 @@ async fn run_turn(
                 state.apply(UiEvent::ApprovalRequested(call.request));
                 pending = Some(call.reply);
             }
-            // Poll the keyboard while the turn runs: answer an open modal, or
-            // cancel the turn with Ctrl-C.
-            _ = tokio::time::sleep(Duration::from_millis(40)) => {
+            // Tick: advance the working indicator and poll the keyboard (answer an
+            // open modal, or cancel the turn with Ctrl-C).
+            _ = tokio::time::sleep(Duration::from_millis(80)) => {
+                state.spinner = state.spinner.wrapping_add(1);
+                state.working_secs = started.elapsed().as_secs();
                 if event::poll(Duration::ZERO)? {
                     if let Event::Key(key) = event::read()? {
-                        pending = resolve_key(state, pending, key, &cancel);
+                        if key.kind == KeyEventKind::Press {
+                            pending = resolve_key(state, pending, key, &cancel);
+                        }
                     }
                 }
             }
@@ -288,12 +313,18 @@ fn is_cancel(key: KeyEvent) -> bool {
 }
 
 fn is_submit(key: KeyEvent, input: &str) -> bool {
-    key.code == KeyCode::Enter && !input.trim().is_empty() && !input.trim_start().starts_with('/')
+    // Alt+Enter inserts a newline instead of submitting.
+    key.code == KeyCode::Enter
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !input.trim().is_empty()
+        && !input.trim_start().starts_with('/')
 }
 
 fn map_key(key: KeyEvent) -> Option<Key> {
     match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Key::CtrlC),
+        // Alt+Enter is a literal newline in the input.
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => Some(Key::Char('\n')),
         KeyCode::Char(c) => Some(Key::Char(c)),
         KeyCode::Enter => Some(Key::Enter),
         KeyCode::Backspace => Some(Key::Backspace),
@@ -318,6 +349,9 @@ fn map_event(event: RuntimeEvent, elapsed_secs: f64) -> Option<UiEvent> {
             },
         }),
         RuntimeEvent::QuotaPaused { reset } => Some(UiEvent::QuotaPaused { reset }),
+        // Surface provider warnings/errors in the transcript so a failed turn is
+        // visible instead of silently producing no response.
+        RuntimeEvent::Warning(message) => Some(UiEvent::Notice(message)),
         _ => None,
     }
 }
@@ -333,13 +367,17 @@ fn ui_profile(profile: Profile) -> UiProfile {
 fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen)?;
+    execute!(stdout, terminal::EnterAlternateScreen, EnableBracketedPaste)?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     terminal::disable_raw_mode()?;
-    execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableBracketedPaste,
+        terminal::LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }

@@ -105,10 +105,21 @@ fn render_thinking(frame: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
+const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
+
 fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
+    let title = if state.busy {
+        format!(
+            "input  {} working {}s  (Ctrl-C to cancel)",
+            SPINNER[state.spinner % SPINNER.len()],
+            state.working_secs
+        )
+    } else {
+        "input  (Enter to send · Alt+Enter for newline)".to_string()
+    };
     frame.render_widget(
         Paragraph::new(state.input.clone())
-            .block(Block::bordered().title("input"))
+            .block(Block::bordered().title(title))
             .wrap(Wrap { trim: false }),
         area,
     );
