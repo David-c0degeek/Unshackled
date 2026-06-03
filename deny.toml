@@ -6,9 +6,7 @@
 
 [advisories]
 # RustSec advisory database. Advisories are normally resolved by upgrading, not
-# ignoring. Each entry below is a deep transitive we do not control directly,
-# flagged only as unmaintained (no known vulnerability), kept until the parent
-# crate (rustls/reqwest) drops it.
+# ignoring. Each entry below is a deep transitive we do not control directly.
 ignore = [
     # rustls-pemfile is unmaintained; pulled transitively via rustls. No known
     # vulnerability — an advisory of category "unmaintained" only.
@@ -16,6 +14,12 @@ ignore = [
     # paste is unmaintained; pulled transitively via ratatui. No known
     # vulnerability — an "unmaintained" advisory only.
     "RUSTSEC-2024-0436",
+    # time 0.3.37 (transitive via the LocalMind submodule, which pins it
+    # exactly): a stack-exhaustion DoS reachable only by parsing maliciously
+    # crafted RFC 2822 input. LocalMind formats/parses its own timestamps and
+    # never parses untrusted RFC 2822, so it is unreachable here. Clear by
+    # bumping the submodule's `time` pin to >= 0.3.47 upstream.
+    "RUSTSEC-2026-0009",
 ]
 
 [licenses]
