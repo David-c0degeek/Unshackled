@@ -315,3 +315,47 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Header, Mode};
+
+    fn state_with_input(input: &str) -> AppState {
+        let mut state = AppState::new(
+            Header {
+                version: "0".into(),
+                provider: "p".into(),
+                model: "m".into(),
+                workspace: "w".into(),
+                session_id: "s".into(),
+                update: None,
+            },
+            Mode::Agent,
+            Profile::Default,
+        );
+        state.input = input.to_string();
+        state
+    }
+
+    #[test]
+    fn input_box_grows_until_the_global_cap() {
+        let state = state_with_input("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
+        let area = Rect::new(0, 0, 80, 40);
+        assert_eq!(input_box_height(&state, area), MAX_INPUT_TEXT_ROWS + 2);
+    }
+
+    #[test]
+    fn input_box_cap_shrinks_with_terminal_height() {
+        let state = state_with_input("1\n2\n3\n4\n5\n6");
+        let area = Rect::new(0, 0, 80, 13);
+        assert_eq!(input_box_height(&state, area), 5);
+    }
+
+    #[test]
+    fn input_box_counts_wrapped_rows() {
+        let state = state_with_input("abcdefghijklmnopqrstuv");
+        let area = Rect::new(0, 0, 12, 40);
+        assert_eq!(input_box_height(&state, area), 5);
+    }
+}
