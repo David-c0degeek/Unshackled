@@ -40,9 +40,14 @@ if (-not $Toolchain -and ($Features -match 'tui') -and (Get-Command rustup -Erro
 
 Write-Host "building and installing the unshackled CLI (features: $Features) ..."
 if ($Toolchain) {
-    cargo "+$Toolchain" install --path $cli --features $Features --locked
+    cargo "+$Toolchain" install --path $cli --features $Features --locked --force
 } else {
-    cargo install --path $cli --features $Features --locked
+    cargo install --path $cli --features $Features --locked --force
+}
+# A native command failure does not trip $ErrorActionPreference; check explicitly
+# so a failed build never reports success.
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "cargo install failed (exit $LASTEXITCODE). See the build error above. If it is a missing C compiler (SQLite/rusqlite for the learning feature), install the Visual Studio Build Tools 'Desktop development with C++' workload, or re-run with -Features tui."
 }
 
 Write-Host ""
