@@ -198,6 +198,7 @@ async fn run_turn(
 ) -> anyhow::Result<()> {
     let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
     let cancel = CancellationToken::new();
+    let started = std::time::Instant::now();
     let turn = runtime.run_turn(prompt, &events, &cancel);
     tokio::pin!(turn);
 
@@ -213,7 +214,7 @@ async fn run_turn(
             }
             received = rx.recv() => {
                 if let Ok(event) = received {
-                    if let Some(ui) = map_event(event) {
+                    if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
                         state.apply(ui);
                     }
                 }
@@ -289,15 +290,20 @@ fn map_key(key: KeyEvent) -> Option<Key> {
     }
 }
 
-fn map_event(event: RuntimeEvent) -> Option<UiEvent> {
+fn map_event(event: RuntimeEvent, elapsed_secs: f64) -> Option<UiEvent> {
     match event {
         RuntimeEvent::Text(text) => Some(UiEvent::TextDelta(text)),
         RuntimeEvent::Reasoning(text) => Some(UiEvent::ReasoningDelta(text)),
         RuntimeEvent::Usage(usage) => Some(UiEvent::Usage {
             tokens_in: usage.input_tokens,
             tokens_out: usage.output_tokens,
-            tokens_per_sec: 0.0,
+            tokens_per_sec: if elapsed_secs > 0.0 {
+                usage.output_tokens as f64 / elapsed_secs
+            } else {
+                0.0
+            },
         }),
+        RuntimeEvent::QuotaPaused { reset } => Some(UiEvent::QuotaPaused { reset }),
         _ => None,
     }
 }
