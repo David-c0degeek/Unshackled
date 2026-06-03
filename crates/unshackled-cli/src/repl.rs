@@ -157,9 +157,19 @@ pub async fn run_chat(
     };
     let mut state = AppState::new(header, Mode::Agent, ui_profile(profile));
 
+    let session_id = runtime.session_id();
     let mut terminal = enter_terminal()?;
-    let result = event_loop(&mut terminal, &mut state, &mut runtime, &mut approval_rx).await;
+    let result = event_loop(
+        &mut terminal,
+        &mut state,
+        &mut runtime,
+        &mut approval_rx,
+        &cwd,
+    )
+    .await;
     leave_terminal(&mut terminal)?;
+    // Learn from the finished session (no-op without the learning feature).
+    crate::context_inject::close_out(&cwd, session_id);
     result
 }
 
@@ -168,6 +178,7 @@ async fn event_loop(
     state: &mut AppState,
     runtime: &mut SessionRuntime,
     approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
+    cwd: &std::path::Path,
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, state))?;
@@ -179,6 +190,9 @@ async fn event_loop(
             if let Event::Key(key) = event::read()? {
                 if is_submit(key, &state.input) {
                     let prompt = std::mem::take(&mut state.input);
+                    // Seed relevant accepted memory for this prompt (no-op without
+                    // the learning feature or when nothing matches).
+                    crate::context_inject::seed(cwd, runtime, &prompt);
                     state.apply(UiEvent::UserMessage(prompt.clone()));
                     run_turn(terminal, state, runtime, approval_rx, &prompt).await?;
                 } else if let Some(mapped) = map_key(key) {

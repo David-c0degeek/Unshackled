@@ -159,6 +159,13 @@ impl SessionRuntime {
         self.last_quota.as_ref()
     }
 
+    /// Seed a system message into the conversation — for example retrieved
+    /// project context injected by the host before a turn. Persisted and counted
+    /// in context like any message.
+    pub fn seed_system(&mut self, text: impl Into<String>) {
+        self.append(Message::new(Role::System, vec![ContentBlock::text(text)]));
+    }
+
     fn tool_specs(&self) -> Vec<ToolSpec> {
         self.tools
             .specs()

@@ -52,7 +52,7 @@ pub async fn print_mode(
     .cloned()
     .ok_or_else(|| anyhow::anyhow!("no provider is configured"))?;
 
-    let runtime = SessionRuntime::new(
+    let mut runtime = SessionRuntime::new(
         provider,
         crate::mcp::McpTools::load(&config).await.registry(),
         PermissionEngine::new(profile, Vec::new()),
@@ -68,6 +68,7 @@ pub async fn print_mode(
         },
         Vec::new(),
     );
+    crate::context_inject::seed(&cwd, &mut runtime, prompt);
 
     run_and_print(runtime, prompt).await
 }

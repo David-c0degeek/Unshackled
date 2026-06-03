@@ -295,15 +295,14 @@ pub async fn resume(
 
     const MAX_STEPS: usize = 100;
     for _ in 0..MAX_STEPS {
-        let remaining = std::fs::read_to_string(root.join("PROGRESS.md"))
+        let next_step = std::fs::read_to_string(root.join("PROGRESS.md"))
             .ok()
             .and_then(|t| Progress::parse(&t).ok())
-            .map(|p| p.next_incomplete().is_some())
-            .unwrap_or(false);
-        if !remaining {
+            .and_then(|p| p.next_incomplete().map(|s| s.description.clone()));
+        let Some(step_description) = next_step else {
             writeln!(out, "all steps complete")?;
             break;
-        }
+        };
 
         let mut runtime = build_runtime(
             root,
@@ -313,6 +312,7 @@ pub async fn resume(
             model,
             &mcp,
         );
+        crate::context_inject::seed(root, &mut runtime, &step_description);
         let outcome = resume_one_step(
             &mut runtime,
             root,
