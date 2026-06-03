@@ -10,7 +10,7 @@
 //! API reference (<https://platform.openai.com/docs/api-reference/chat>). No
 //! private endpoint behaviour, prompts, or identifiers were copied.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -369,6 +369,7 @@ type EventQueue = VecDeque<Result<ModelEvent, ProviderError>>;
 struct SseDecoder {
     buf: String,
     tools: BTreeMap<u32, ToolAccum>,
+    warned_finish_reasons: BTreeSet<String>,
     done: bool,
 }
 
@@ -460,8 +461,11 @@ impl SseDecoder {
                     }
                 }
             }
-            if choice["finish_reason"].as_str() == Some("tool_calls") {
-                self.flush_tools(out);
+            if let Some(reason) = choice["finish_reason"].as_str() {
+                if reason == "tool_calls" {
+                    self.flush_tools(out);
+                }
+                self.warn_for_finish_reason(reason, out);
             }
         }
         if chunk["usage"].is_object() {
@@ -496,6 +500,29 @@ impl SseDecoder {
                 name,
                 input_json,
             }));
+        }
+    }
+
+    fn warn_for_finish_reason(&mut self, reason: &str, out: &mut EventQueue) {
+        if !self.warned_finish_reasons.insert(reason.to_string()) {
+            return;
+        }
+        let message = match reason {
+            "stop" | "tool_calls" => None,
+            "function_call" => Some(
+                "provider returned a legacy function_call finish reason; no tool call was decoded"
+                    .to_string(),
+            ),
+            "length" => Some(
+                "provider stopped because the token limit was reached; output may be truncated"
+                    .to_string(),
+            ),
+            "content_filter" => Some("provider filtered part or all of the response".to_string()),
+            other if other.trim().is_empty() => None,
+            other => Some(format!("provider finished with reason `{other}`")),
+        };
+        if let Some(message) = message {
+            out.push_back(Ok(ModelEvent::ProviderWarning { message }));
         }
     }
 }
@@ -610,6 +637,46 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Err(ProviderError::StreamDecode(_)))));
+    }
+
+    #[test]
+    fn length_finish_reason_yields_warning() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Ok(ModelEvent::ProviderWarning { message })
+                if message.contains("token limit")
+        )));
+    }
+
+    #[test]
+    fn normal_tool_calls_finish_reason_is_quiet() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, Ok(ModelEvent::ProviderWarning { .. }))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Ok(ModelEvent::ToolCall { name, .. }) if name == "read_file")));
+    }
+
+    #[test]
+    fn legacy_function_call_finish_reason_yields_warning() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"function_call\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Ok(ModelEvent::ProviderWarning { message })
+                if message.contains("legacy function_call")
+        )));
     }
 
     #[test]

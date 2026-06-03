@@ -358,6 +358,7 @@ struct SseDecoder {
     tools: BTreeMap<u64, ToolAccum>,
     input_tokens: u64,
     done: bool,
+    warned_stop_reason: bool,
 }
 
 #[derive(Default)]
@@ -440,6 +441,9 @@ impl SseDecoder {
                         output_tokens,
                     })));
                 }
+                if let Some(reason) = event["delta"]["stop_reason"].as_str() {
+                    self.warn_for_stop_reason(reason, out);
+                }
             }
             Some("message_stop") => self.emit_done(out),
             Some("error") => {
@@ -510,6 +514,32 @@ impl SseDecoder {
             name: accum.name,
             input_json,
         }));
+    }
+
+    fn warn_for_stop_reason(&mut self, reason: &str, out: &mut EventQueue) {
+        if self.warned_stop_reason {
+            return;
+        }
+        let message = match reason {
+            "end_turn" | "tool_use" => None,
+            "max_tokens" => {
+                Some("provider stopped at max_tokens; output may be truncated".to_string())
+            }
+            "pause_turn" => Some(
+                "provider paused during server-tool processing; a continuation may be required"
+                    .to_string(),
+            ),
+            "refusal" => Some("provider refused the request".to_string()),
+            "stop_sequence" => Some(
+                "provider stopped at a configured stop sequence; output may be partial".to_string(),
+            ),
+            other if other.trim().is_empty() => None,
+            other => Some(format!("provider stopped with reason `{other}`")),
+        };
+        if let Some(message) = message {
+            self.warned_stop_reason = true;
+            out.push_back(Ok(ModelEvent::ProviderWarning { message }));
+        }
     }
 }
 
@@ -614,6 +644,30 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Err(ProviderError::StreamDecode(m)) if m == "overloaded")));
+    }
+
+    #[test]
+    fn max_tokens_stop_reason_yields_warning() {
+        let events = collect_sse(&[
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":5}}\n",
+            "data: {\"type\":\"message_stop\"}\n",
+        ]);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Ok(ModelEvent::ProviderWarning { message })
+                if message.contains("max_tokens")
+        )));
+    }
+
+    #[test]
+    fn normal_tool_use_stop_reason_is_quiet() {
+        let events = collect_sse(&[
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "data: {\"type\":\"message_stop\"}\n",
+        ]);
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, Ok(ModelEvent::ProviderWarning { .. }))));
     }
 
     #[test]
