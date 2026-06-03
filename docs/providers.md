@@ -108,7 +108,9 @@ cargo test -p unshackled-harness --test evals
 
 Live validation is opt-in and never commits credentials. Set
 `UNSHACKLED_LIVE_TESTS=1` only in a local shell that already has provider
-configuration and credentials.
+configuration and credentials. The live runner uses the default configured
+provider and model. If no model is configured, set `UNSHACKLED_LIVE_MODEL` in
+that same local shell.
 
 ## Verifying
 
