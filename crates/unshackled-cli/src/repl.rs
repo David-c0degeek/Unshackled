@@ -275,20 +275,32 @@ async fn run_turn(
         tokio::select! {
             _ = &mut turn => {
                 // Drain any events still buffered so a fast response is not lost
-                // when the turn future completes in the same poll.
-                while let Ok(event) = rx.try_recv() {
-                    if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
-                        state.apply(ui);
+                // when the turn future completes in the same poll. Continue past
+                // Lagged errors: the receiver advances to the oldest available
+                // message, so calling try_recv again still returns events.
+                loop {
+                    match rx.try_recv() {
+                        Ok(event) => {
+                            if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
+                                state.apply(ui);
+                            }
+                        }
+                        Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                        Err(_) => break,
                     }
                 }
                 state.apply(UiEvent::TurnComplete);
                 break;
             }
             received = rx.recv() => {
-                if let Ok(event) = received {
-                    if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
-                        state.apply(ui);
+                match received {
+                    Ok(event) => {
+                        if let Some(ui) = map_event(event, started.elapsed().as_secs_f64()) {
+                            state.apply(ui);
+                        }
                     }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => {}
                 }
             }
             Some(call) = approval_rx.recv() => {
@@ -421,9 +433,16 @@ fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     // Pushed unconditionally (as Codex does): a terminal that doesn't support it
     // ignores the sequence, and the support query can false-negative. The flags
     // are popped on exit.
+    // REPORT_EVENT_TYPES is required alongside DISAMBIGUATE_ESCAPE_CODES so that
+    // release/repeat events carry an explicit kind in the CSI sequence. Without it
+    // Windows Terminal emits both a legacy press event and a Kitty-encoded event
+    // for the same keypress, both parsed as KeyEventKind::Press, doubling input.
     let _ = execute!(
         stdout,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+        )
     );
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
