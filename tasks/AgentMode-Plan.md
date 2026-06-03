@@ -30,9 +30,47 @@ defer it); any GUI. No new operating mode.
 | `docs/04-provider-contract.md`, `docs/05-tool-system.md` | Provider trait + tool trait contracts the new work extends |
 | `docs/00-clean-room.md`, `AGENTS.md`, ADR-0004/0005 | Clean-room provenance rules; the read-only behavior reference policy |
 | `crates/unshackled-harness/src/session.rs` | The existing `run_turn` loop, recovery, compaction to extend |
-| Read-only behavior reference (`AGENTS.md`-documented path) | **Behavior only.** Observable capabilities of a mature agent CLI. Not a source of prompts, code, identifiers, or UI copy. |
+| Read-only behavior reference (`AGENTS.md`-documented path) | **Black-box behavior only.** Observable capabilities, workflows, and edge cases of a mature agent CLI. Not a source of prompts, code, schemas, identifiers, tests, file structure, UI copy, or branding. |
 | Official Anthropic / OpenAI API docs | The documented env-var and request conventions to support (e.g. `ANTHROPIC_BASE_URL`) |
 | `<base>` | TBD (record the branch/commit this plan branches from) |
+
+### Behavior distillation workflow
+
+Use the read-only behavior reference as a map of product expectations, not as a
+source artefact:
+
+1. Prefer black-box observation: run workflows, trigger failures, inspect
+   user-visible behavior, and note only what happened at the capability level.
+2. Convert observations into neutral requirement notes under
+   `tasks/agent-mode/behavior-requirements.md`. Requirements describe observable
+   outcomes, not text, identifiers, source layout, prompt structure, tool schema
+   shape, or implementation approach.
+3. Implement from this repository's architecture, original design, and official
+   public documentation. Do not keep the reference open while authoring prompts,
+   schemas, tests, user-facing text, or code.
+4. Test against the neutral requirements and this repo's specs. Do not snapshot
+   or match reference output.
+5. When a requirement was informed by the reference, record provenance in the
+   Decision log or subject progress log at the behavior level only.
+
+### Maturity benchmark workflow
+
+The mature fork is the product benchmark for the maturity envelope, not an
+implementation source. Subject 05 must prove that Rust agent mode carries
+forward the hard-earned behavioral lessons:
+
+1. Build a scenario catalog from real mature-fork usage history, dogfood tasks,
+   and black-box observation. Include happy paths and failure paths.
+2. Classify each scenario by failure mode: malformed tool call, stalled loop,
+   context loss, bad edit, permission denial, timeout, provider parse issue,
+   final-answer pollution, local-model quality limit, or user interruption.
+3. Map every scenario to one of: automated regression test, live eval task,
+   manual dogfood check, or explicitly deferred limitation.
+4. Run Rust agent mode and the mature fork through representative task classes
+   and compare outcomes only. Do not compare output wording, prompts, schemas,
+   internal traces, or implementation shape.
+5. Treat maturity gaps as blocking unless they are recorded as accepted
+   limitations with a concrete rationale.
 
 ## 3. Subject file index
 
@@ -43,7 +81,7 @@ defer it); any GUI. No new operating mode.
 | 02 | `tasks/agent-mode/02-tool-surface.md` | Tool-surface expansion |
 | 03 | `tasks/agent-mode/03-provider-runtime.md` | Provider runtime: env compat, timeouts, thinking |
 | 04 | `tasks/agent-mode/04-context-management.md` | Context, compaction, and long-session handling |
-| 05 | `tasks/agent-mode/05-evaluation.md` | Live validation + agentic eval suite |
+| 05 | `tasks/agent-mode/05-evaluation.md` | Live validation + maturity benchmark |
 
 ## 4. Decision log
 
@@ -55,12 +93,12 @@ defer it); any GUI. No new operating mode.
 
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
-| [ ] | 00 | `tasks/agent-mode/00-tooling-research-and-readiness.md` | TODO | agent: 8 | n/a |
+| [ ] | 00 | `tasks/agent-mode/00-tooling-research-and-readiness.md` | TODO | agent: 9 | n/a |
 | [ ] | 01 | `tasks/agent-mode/01-system-prompt-and-loop.md` | TODO | TBD | TBD |
 | [ ] | 02 | `tasks/agent-mode/02-tool-surface.md` | TODO | TBD | TBD |
 | [ ] | 03 | `tasks/agent-mode/03-provider-runtime.md` | TODO | TBD | TBD |
 | [ ] | 04 | `tasks/agent-mode/04-context-management.md` | TODO | TBD | TBD |
-| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | TODO | TBD | TBD |
+| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | TODO | agent: 6; release-engineer: 3 | yes |
 
 ## 6. Cross-cutting principles
 
@@ -69,12 +107,14 @@ defer it); any GUI. No new operating mode.
 1. KISS · YAGNI · CLEAN · SOLID · DRY (in that order when conflicting).
 2. **Clean-room provenance is blocking and is the defining constraint of this
    plan.** The behavior reference is a *patched third-party product*: consult it
-   only for **observable behavior**, never as a source. Do **not** copy or
-   paraphrase its prompts, code, tests, identifiers, file structure, UI copy, or
-   branding. Every prompt, tool, and message shipped here is written from first
-   principles and original to this repo. Where the reference informed a design
-   decision, record a provenance note in the Decision log naming *what behavior*
-   was matched — never *what text* was read. See `docs/00-clean-room.md`.
+   only for **observable behavior**, never as a source. Do **not** copy,
+   paraphrase, translate, port, summarize, or mechanically transform its prompts,
+   code, tests, identifiers, file structure, UI copy, schema wording, or
+   branding. Every prompt, tool, test, and message shipped here is written from
+   first principles and original to this repo. Where the reference informed a
+   design decision, record a provenance note in the Decision log naming *what
+   behavior* was matched — never *what text* was read. See
+   `docs/00-clean-room.md`.
 3. **Official public APIs and local servers only.** No private or undocumented
    endpoints. Env-var/header conventions adopted must be the documented public
    ones (e.g. the Anthropic SDK's `ANTHROPIC_BASE_URL`), used as integration
@@ -98,13 +138,17 @@ defer it); any GUI. No new operating mode.
     shipped code, comments, identifiers, or commit messages.
 12. **Captain Hindsight review before each subject close** (verdict `CLOSE`).
 13. **Tooling research before implementation** — subject 00 first.
-14. **Behavior parity across Windows, Linux, macOS** (ADR-0007); the interactive
-    paths are validated where they can run (TUI on MSVC).
+14. **Capability coverage across Windows, Linux, macOS** (ADR-0007); the
+    interactive paths are validated where they can run (TUI on MSVC).
 
 ## 7. Gate review (run last; tick everything)
 
 - [ ] All §5 subjects `DONE` (or `ABANDONED` with a §4 row)
 - [ ] Subject 00 completed or waived with a §4 row
+- [ ] Behavior requirements, if any, are neutral, observable, and provenance-noted
+      in `tasks/agent-mode/behavior-requirements.md`
+- [ ] Maturity benchmark scorecard passed, or every gap is fixed, tested, or
+      recorded as an accepted limitation with rationale
 - [ ] `cargo check --workspace`, `cargo build --workspace` (3-OS via CI) pass
 - [ ] `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` clean
 - [ ] `cargo test --workspace` green on Windows, Ubuntu, macOS
@@ -118,8 +162,9 @@ defer it); any GUI. No new operating mode.
       `\bD\d{3}\b`, `tasks/agent-mode/`, `AgentMode-Plan.md`, `\bslices?\b`
 - [ ] Commit messages plan-agnostic
 - [ ] `tasks/agent-mode/manual-actions.md` — every human-owned box resolved or deferred
-- [ ] **Live-provider validation passed** (subject 05): agent mode completes a
-      small real repo task against a capable hosted model and a capable local model
+- [ ] **Live-provider validation passed** (subject 05): agent mode completes
+      representative eval and dogfood tasks against a capable hosted model and a
+      capable local model
 - [ ] `tasks/agent-mode/lessons.md` reconciled; lasting lessons migrated to `tasks/lessons.md`
 - [ ] Plan handed to reviewer for §8 sign-off
 

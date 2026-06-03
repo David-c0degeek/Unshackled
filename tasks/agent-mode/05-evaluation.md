@@ -1,30 +1,48 @@
-# 05 — Live Validation + Agentic Eval Suite
+# 05 — Live Validation + Maturity Benchmark
 
 ## Goal
 Prove agent mode actually completes real repo tasks — the single biggest unknown
 — against both a capable hosted model and a capable local model, and lock the
-result with a repeatable eval so regressions are caught.
+result with a repeatable eval so regressions are caught. The mature fork is the
+black-box product benchmark for maturity: Rust agent mode must carry forward the
+same observable dependability envelope through original implementation.
 
 ## Boxes
 
-- [ ] **05.1** (agent) Define a small set of golden agent tasks on a throwaway
+- [ ] **05.1** (agent) Build a maturity scenario catalog from real mature-fork
+      usage history, dogfood tasks, and black-box observation. Convert each item
+      into a neutral observable requirement in
+      `tasks/agent-mode/behavior-requirements.md`; do not copy or paraphrase
+      output, prompts, schemas, tests, identifiers, internal traces, or
+      implementation details. Artefact: a scenario matrix with provenance.
+- [ ] **05.2** (agent) Define the failure taxonomy and scorecard categories:
+      malformed tool call, stalled loop, context loss, bad edit, permission
+      denial, timeout, provider parse issue, final-answer pollution,
+      local-model quality limit, user interruption, and accepted limitation.
+      Artefact: scorecard fields used by automated and manual runs.
+- [ ] **05.3** (agent) Define a small set of golden agent tasks on a throwaway
       repo (e.g. "add a failing test then make it pass", "fix a named bug",
       "rename a symbol across files"), each with an automatic pass check.
       Artefact: the task definitions + checks under the eval suite.
-- [ ] **05.2** (agent) Add an opt-in live eval runner (behind an env flag, no key
+- [ ] **05.4** (agent) Add an opt-in live eval runner (behind an env flag, no key
       committed) that runs the golden tasks end to end and reports a success rate
       and a per-task scorecard. Artefact: the runner + a scorecard format.
-- [ ] **05.3** (release-engineer) Run the live eval once against a capable hosted
+- [ ] **05.5** (release-engineer) Run the live eval once against a capable hosted
       model (real key, local only) and record the scorecard. Mirror into
       `manual-actions.md`.
-- [ ] **05.4** (release-engineer) Run the live eval against a capable local model
+- [ ] **05.6** (release-engineer) Run the live eval against a capable local model
       (≥ Q4 via a local OpenAI-compatible server or the Anthropic gateway) and
       record the scorecard; note where local-model quality limits results.
       Mirror into `manual-actions.md`.
-- [ ] **05.5** (agent) Triage failures from 05.3/05.4 into concrete fixes
-      (prompt, tool, loop) or recorded limitations (§4 decisions / `lessons.md`);
-      re-run until the hosted-model success rate meets the agreed bar.
-- [ ] **05.6** (agent) Document how to run the eval and interpret the scorecard;
+- [ ] **05.7** (release-engineer) Run representative maturity scenarios against
+      the mature fork and Rust agent mode as black-box products, comparing only
+      outcomes: task completion, recovery, permission behavior, context
+      preservation, and verification. Mirror into `manual-actions.md`.
+- [ ] **05.8** (agent) Triage failures from 05.5/05.6/05.7 into concrete fixes
+      (prompt, tool, loop, context, provider runtime) or recorded limitations
+      (§4 decisions / `lessons.md`); re-run until the hosted-model success rate
+      and maturity scorecard meet the agreed bar.
+- [ ] **05.9** (agent) Document how to run the eval and interpret the scorecard;
       ensure the offline suite stays green and the live path stays opt-in.
 
 ## Hindsight checkpoint

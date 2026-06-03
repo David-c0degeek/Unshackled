@@ -5,5 +5,6 @@
 
 | Box ID | Owner | Action | Source subject | Status | Deferral rationale |
 |---|---|---|---|---|---|
-| 05.3 | release-engineer | Run the live eval once against a capable hosted model (real key, never committed); record the scorecard. | 05 | TODO | |
-| 05.4 | release-engineer | Run the live eval against a capable local model (≥ Q4 via a local server or the gateway); record the scorecard. | 05 | TODO | |
+| 05.5 | release-engineer | Run the live eval once against a capable hosted model (real key, never committed); record the scorecard. | 05 | TODO | |
+| 05.6 | release-engineer | Run the live eval against a capable local model (≥ Q4 via a local server or the gateway); record the scorecard. | 05 | TODO | |
+| 05.7 | release-engineer | Run representative maturity scenarios against the mature fork and Rust agent mode as black-box products; compare outcomes only. | 05 | TODO | |
