@@ -11,8 +11,11 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
+use unshackled_config::{load, CliOverrides, ConfigPaths};
 use unshackled_harness::{resume_one_step, RuleEngine, SessionConfig, SessionRuntime};
-use unshackled_llm::FakeProvider;
+use unshackled_llm::{FakeProvider, ProviderRegistry};
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use unshackled_store::Store;
@@ -35,6 +38,13 @@ struct TaskScore {
     name: &'static str,
     success: bool,
     committed: bool,
+}
+
+#[derive(Debug)]
+struct LiveTaskScore {
+    name: &'static str,
+    success: bool,
+    stop_reason: String,
 }
 
 fn git(root: &Path, args: &[&str]) {
@@ -178,6 +188,13 @@ fn tasks() -> Vec<GoldenTask> {
     ]
 }
 
+fn live_tasks() -> Vec<GoldenTask> {
+    tasks()
+        .into_iter()
+        .filter(|task| !task.name.starts_with("negative"))
+        .collect()
+}
+
 #[test]
 fn golden_task_scorecard() {
     let scores: Vec<TaskScore> = tasks().iter().map(run_task).collect();
@@ -216,7 +233,99 @@ fn live_eval_is_gated_behind_an_env_var() {
         eprintln!("skipping live eval: set UNSHACKLED_LIVE_TESTS to enable");
         return;
     }
-    // A live eval would build a real provider from config and run a read-only
-    // golden task; it is intentionally a no-op without a configured provider.
-    eprintln!("live eval mode is enabled but requires a configured provider");
+
+    let cwd = std::env::current_dir().unwrap();
+    let config = load(&ConfigPaths::standard(&cwd), &CliOverrides::default()).unwrap();
+    let registry = match ProviderRegistry::from_config(&config) {
+        Ok(registry) => registry,
+        Err(err) => {
+            eprintln!("skipping live eval: provider configuration is incomplete: {err}");
+            return;
+        }
+    };
+    let Some(provider) = registry.default_provider().cloned() else {
+        eprintln!("skipping live eval: no default provider is configured");
+        return;
+    };
+    let Some(model) = std::env::var("UNSHACKLED_LIVE_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| config.resolve_model(None))
+    else {
+        eprintln!(
+            "skipping live eval: set provider.model, provider model env, or UNSHACKLED_LIVE_MODEL"
+        );
+        return;
+    };
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let scores: Vec<LiveTaskScore> = live_tasks()
+        .iter()
+        .map(|task| rt.block_on(run_live_task(task, provider.clone(), model.clone())))
+        .collect();
+    let passed = scores.iter().filter(|score| score.success).count();
+    let total = scores.len();
+    eprintln!(
+        "live golden-task scorecard: {passed}/{total} ({:.0}%)",
+        (passed as f64 / total as f64) * 100.0
+    );
+    for score in &scores {
+        eprintln!(
+            "  {} success={} stop_reason={}",
+            score.name, score.success, score.stop_reason
+        );
+    }
+}
+
+async fn run_live_task(
+    task: &GoldenTask,
+    provider: std::sync::Arc<dyn unshackled_llm::ModelProvider>,
+    model: String,
+) -> LiveTaskScore {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (rel, contents) in &task.files {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents).unwrap();
+    }
+
+    let (events, _rx) = broadcast::channel(128);
+    let cancel = CancellationToken::new();
+    let mut runtime = SessionRuntime::new(
+        provider,
+        ToolRegistry::with_builtins(),
+        PermissionEngine::new(Profile::Bypass, Vec::new()),
+        Box::new(ScriptedApprover::always()),
+        Store::open(root),
+        Workspace::new(root).unwrap(),
+        RecoveryEngine::new(RecoveryBudget::default()),
+        SessionConfig {
+            interactivity: Interactivity::NonInteractive,
+            trusted: true,
+            model,
+            max_turns: 8,
+            max_tool_calls: 16,
+            ..SessionConfig::default()
+        },
+        Vec::new(),
+    );
+
+    let reason = runtime
+        .run_turn(
+            &format!(
+                "Complete this task in the workspace using the available tools: {}",
+                task.step
+            ),
+            &events,
+            &cancel,
+        )
+        .await;
+    LiveTaskScore {
+        name: task.name,
+        success: (task.expect)(root),
+        stop_reason: format!("{reason:?}"),
+    }
 }

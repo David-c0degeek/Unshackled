@@ -100,7 +100,7 @@ forward the hard-earned behavioral lessons:
 | [x] | 02 | `tasks/agent-mode/02-tool-surface.md` | DONE | agent: 4 implemented; 2 deferred by §4 decision | n/a |
 | [ ] | 03 | `tasks/agent-mode/03-provider-runtime.md` | PARTIAL | agent: 5 done; live gateway verification open | n/a |
 | [x] | 04 | `tasks/agent-mode/04-context-management.md` | DONE | agent: 4 done | n/a |
-| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | PARTIAL | agent: offline eval/docs done; live and maturity benchmark open | yes |
+| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | PARTIAL | agent: offline eval/docs + live runner done; live runs and maturity benchmark open | yes |
 
 ## 6. Cross-cutting principles
 

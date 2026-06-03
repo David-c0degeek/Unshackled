@@ -24,7 +24,7 @@ same observable dependability envelope through original implementation.
       repo (e.g. "add a failing test then make it pass", "fix a named bug",
       "rename a symbol across files"), each with an automatic pass check.
       Artefact: the task definitions + checks under the eval suite.
-- [ ] **05.4** (agent) Add an opt-in live eval runner (behind an env flag, no key
+- [x] **05.4** (agent) Add an opt-in live eval runner (behind an env flag, no key
       committed) that runs the golden tasks end to end and reports a success rate
       and a per-task scorecard. Artefact: the runner + a scorecard format.
 - [ ] **05.5** (release-engineer) Run the live eval once against a capable hosted
@@ -54,3 +54,4 @@ same observable dependability envelope through original implementation.
 
 - 2026-06-03 · offline evals · 05.2, 05.3, 05.9 · failure modes and golden tasks are documented in behavior requirements and covered by the offline eval suite; provider docs describe the opt-in live path · verified with `cargo test -p unshackled-harness`.
 - 2026-06-03 · live eval scope · 05.1, 05.4-05.8 · mature-fork scenario catalog, real hosted/local runs, comparison, and failure triage remain open/manual.
+- 2026-06-03 · live eval runner · 05.4 · `crates/unshackled-harness/tests/evals.rs` now runs the golden tasks against the configured default provider/model when `UNSHACKLED_LIVE_TESTS=1`, prints a per-task scorecard, and skips without credentials/model configuration · verified with `cargo test -p unshackled-harness --test evals`.
