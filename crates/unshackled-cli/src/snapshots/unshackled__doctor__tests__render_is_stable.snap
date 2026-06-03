@@ -1,5 +1,6 @@
 ---
 source: crates/unshackled-cli/src/doctor.rs
+assertion_line: 344
 expression: render(&fixture())
 ---
 Unshackled 0.0.0-test
@@ -18,6 +19,6 @@ providers:
 
 tools:
   git (git): available
-  ripgrep (rg): not found
+  ripgrep (rg): not found (optional)
 
 workspace trust: unknown (evaluated when a session starts)

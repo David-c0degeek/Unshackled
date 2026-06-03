@@ -9,6 +9,8 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+use unshackled_config::{CliOverrides, ConfigPaths};
+
 /// A point-in-time view of the local environment relevant to running the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoctorReport {
@@ -44,6 +46,8 @@ pub struct ToolStatus {
     pub name: String,
     pub command: String,
     pub available: bool,
+    /// Whether the agent works without this tool (it has a builtin equivalent).
+    pub optional: bool,
 }
 
 /// Workspace trust state. Trust is established by the sandbox when a session
@@ -114,10 +118,10 @@ pub fn render(report: &DoctorReport) -> String {
 
     let _ = writeln!(s, "tools:");
     for t in &report.tools {
-        let state = if t.available {
-            "available"
-        } else {
-            "not found"
+        let state = match (t.available, t.optional) {
+            (true, _) => "available",
+            (false, true) => "not found (optional)",
+            (false, false) => "not found",
         };
         let _ = writeln!(s, "  {} ({}): {state}", t.name, t.command);
     }
@@ -172,11 +176,16 @@ fn user_config_path() -> Option<PathBuf> {
         .map(|base| base.join("unshackled").join("config.toml"))
 }
 
-/// Known providers and the environment variable that carries each credential.
+/// The configured providers (from `.unshackled.toml`) when any are set,
+/// otherwise the conventional provider kinds and their credential env vars.
 fn providers() -> Vec<ProviderStatus> {
+    if let Some(configured) = configured_providers() {
+        return configured;
+    }
     [
         ("local", "UNSHACKLED_LOCAL_API_KEY"),
         ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
     ]
     .into_iter()
     .map(|(name, env)| ProviderStatus {
@@ -187,20 +196,52 @@ fn providers() -> Vec<ProviderStatus> {
     .collect()
 }
 
+/// Providers declared in the resolved configuration, or `None` when no config is
+/// present or it declares no providers.
+fn configured_providers() -> Option<Vec<ProviderStatus>> {
+    let cwd = std::env::current_dir().ok()?;
+    let config =
+        unshackled_config::load(&ConfigPaths::standard(&cwd), &CliOverrides::default()).ok()?;
+    if config.providers.is_empty() {
+        return None;
+    }
+    Some(
+        config
+            .providers
+            .iter()
+            .map(|(id, entry)| match &entry.api_key_env {
+                Some(env) => ProviderStatus {
+                    name: format!("{id} ({})", entry.kind),
+                    credential_env: env.clone(),
+                    credential_present: credential_present(env),
+                },
+                // No credential is required (for example a bare local server).
+                None => ProviderStatus {
+                    name: format!("{id} ({})", entry.kind),
+                    credential_env: "(none required)".to_string(),
+                    credential_present: true,
+                },
+            })
+            .collect(),
+    )
+}
+
 fn credential_present(env: &str) -> bool {
     std::env::var(env)
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false)
 }
 
-/// External tools the agent can use, checked by scanning `PATH`.
+/// External tools the agent can use, checked by scanning `PATH`. `ripgrep` is
+/// optional — the builtin `search_text` tool searches in-process.
 fn tools() -> Vec<ToolStatus> {
-    [("git", "git"), ("ripgrep", "rg")]
+    [("git", "git", false), ("ripgrep", "rg", true)]
         .into_iter()
-        .map(|(name, command)| ToolStatus {
+        .map(|(name, command, optional)| ToolStatus {
             name: name.to_string(),
             command: command.to_string(),
             available: tool_on_path(command),
+            optional,
         })
         .collect()
 }
@@ -285,11 +326,13 @@ mod tests {
                     name: "git".to_string(),
                     command: "git".to_string(),
                     available: true,
+                    optional: false,
                 },
                 ToolStatus {
                     name: "ripgrep".to_string(),
                     command: "rg".to_string(),
                     available: false,
+                    optional: true,
                 },
             ],
             workspace_trust: TrustState::Unknown,
