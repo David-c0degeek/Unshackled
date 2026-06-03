@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 use ratatui::backend::CrosstermBackend;
@@ -393,10 +394,20 @@ fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, terminal::EnterAlternateScreen, EnableBracketedPaste)?;
+    // Ask the terminal to report keys unambiguously (the kitty keyboard
+    // protocol), so modified keys like Shift+Enter reach the app on terminals
+    // that support it. Best-effort: ignored where unsupported.
+    if terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     terminal::disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
