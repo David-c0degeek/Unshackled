@@ -9,9 +9,15 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod ops;
 
 use std::fmt::Write as _;
 use std::path::Path;
+
+pub use ops::{
+    audit, promote, review_decide, review_list, review_show, search, AuditEntry, ReviewSummary,
+    ReviewVerdict, SearchHit,
+};
 
 use localmind_core::{SessionId as LearningSessionId, SessionSource};
 use localmind_store::{
@@ -184,5 +190,42 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(initialize(dir.path()).unwrap());
         assert!(!initialize(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn review_and_search_surfaces_open_after_closeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = Store::open(root);
+        let session = SessionId::new();
+        store
+            .append_message(
+                session,
+                &Message::text(Role::User, "the build failed with a borrow error"),
+            )
+            .unwrap();
+        store
+            .append_message(
+                session,
+                &Message::text(
+                    Role::Assistant,
+                    "Fixed: clone the value before the await so no lock is held across it.",
+                ),
+            )
+            .unwrap();
+        closeout_session(root, &store, session).unwrap();
+
+        // The review queue, memory search, and audit log all open without error;
+        // their contents depend on the deterministic extractor's heuristics.
+        let items = review_list(root).unwrap();
+        let _ = search(root, "lock").unwrap();
+        let _ = audit(root).unwrap();
+
+        // If a candidate was enqueued, the accept -> promote path round-trips.
+        if let Some(first) = items.first() {
+            review_decide(root, &first.id, ReviewVerdict::Accept, "tester", None).unwrap();
+            let memory_id = promote(root, &first.id).unwrap();
+            assert!(!memory_id.is_empty());
+        }
     }
 }

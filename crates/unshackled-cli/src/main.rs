@@ -11,6 +11,8 @@ use unshackled_store::Store;
 
 mod doctor;
 mod harness_cmd;
+#[cfg(feature = "learning")]
+mod learning_cmd;
 mod mcp;
 mod memory_cmd;
 #[cfg(feature = "tui")]
@@ -44,6 +46,12 @@ enum Command {
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
+    },
+    /// LocalMind learning: closeout, review queue, memory. Requires the `learning` feature.
+    #[cfg(feature = "learning")]
+    Learning {
+        #[command(subcommand)]
+        command: LearningCommand,
     },
     /// Export a session transcript as a redacted, inspectable bundle.
     Export {
@@ -115,6 +123,93 @@ enum MemoryCommand {
     Delete { id: String },
     /// Disable memory injection for this project.
     Disable,
+}
+
+#[cfg(feature = "learning")]
+#[derive(Debug, Subcommand)]
+enum LearningCommand {
+    /// Close out a session: extract candidate lessons and enqueue them for review.
+    Closeout {
+        /// Session id to close out.
+        #[arg(long)]
+        session: String,
+    },
+    /// Review queue: list, show, and decide on candidate lessons.
+    Review {
+        #[command(subcommand)]
+        command: ReviewCommand,
+    },
+    /// Promote an accepted review item into durable memory.
+    Promote {
+        /// Review item id.
+        id: String,
+    },
+    /// Search accepted memory.
+    Search {
+        /// Search query.
+        query: String,
+    },
+    /// Print the memory-change audit log.
+    Audit,
+}
+
+#[cfg(feature = "learning")]
+#[derive(Debug, Subcommand)]
+enum ReviewCommand {
+    /// List the review queue.
+    List,
+    /// Inspect one review item.
+    Show {
+        /// Review item id.
+        id: String,
+    },
+    /// Accept a review item.
+    Accept {
+        /// Review item id.
+        id: String,
+        /// Reviewer name recorded in the audit log.
+        #[arg(long, default_value = "user")]
+        reviewer: String,
+        /// Optional review note.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Reject a review item.
+    Reject {
+        /// Review item id.
+        id: String,
+        /// Reviewer name recorded in the audit log.
+        #[arg(long, default_value = "user")]
+        reviewer: String,
+        /// Optional review note.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Defer a review item (keep temporary).
+    Defer {
+        /// Review item id.
+        id: String,
+        /// Reviewer name recorded in the audit log.
+        #[arg(long, default_value = "user")]
+        reviewer: String,
+        /// Optional review note.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Edit a review item's summary before accepting it.
+    Edit {
+        /// Review item id.
+        id: String,
+        /// Replacement summary.
+        #[arg(long)]
+        replacement: String,
+        /// Reviewer name recorded in the audit log.
+        #[arg(long, default_value = "user")]
+        reviewer: String,
+        /// Optional review note.
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -265,6 +360,73 @@ async fn main() -> anyhow::Result<()> {
                 }
                 MemoryCommand::Delete { id } => memory_cmd::delete(&cwd, &id, &mut stdout)?,
                 MemoryCommand::Disable => memory_cmd::disable(&cwd, &mut stdout)?,
+            }
+        }
+        #[cfg(feature = "learning")]
+        Command::Learning { command } => {
+            use unshackled_localmind::ReviewVerdict;
+            let cwd = std::env::current_dir()?;
+            let mut stdout = io::stdout().lock();
+            match command {
+                LearningCommand::Closeout { session } => {
+                    learning_cmd::closeout(&cwd, &session, &mut stdout)?;
+                }
+                LearningCommand::Review { command } => match command {
+                    ReviewCommand::List => learning_cmd::review_list(&cwd, &mut stdout)?,
+                    ReviewCommand::Show { id } => {
+                        learning_cmd::review_show(&cwd, &id, &mut stdout)?;
+                    }
+                    ReviewCommand::Accept { id, reviewer, note } => {
+                        learning_cmd::review_decide(
+                            &cwd,
+                            &id,
+                            ReviewVerdict::Accept,
+                            &reviewer,
+                            note,
+                            &mut stdout,
+                        )?;
+                    }
+                    ReviewCommand::Reject { id, reviewer, note } => {
+                        learning_cmd::review_decide(
+                            &cwd,
+                            &id,
+                            ReviewVerdict::Reject,
+                            &reviewer,
+                            note,
+                            &mut stdout,
+                        )?;
+                    }
+                    ReviewCommand::Defer { id, reviewer, note } => {
+                        learning_cmd::review_decide(
+                            &cwd,
+                            &id,
+                            ReviewVerdict::Defer,
+                            &reviewer,
+                            note,
+                            &mut stdout,
+                        )?;
+                    }
+                    ReviewCommand::Edit {
+                        id,
+                        replacement,
+                        reviewer,
+                        note,
+                    } => {
+                        learning_cmd::review_decide(
+                            &cwd,
+                            &id,
+                            ReviewVerdict::Edit { replacement },
+                            &reviewer,
+                            note,
+                            &mut stdout,
+                        )?;
+                    }
+                },
+                LearningCommand::Promote { id } => learning_cmd::promote(&cwd, &id, &mut stdout)?,
+                LearningCommand::Search { query } => {
+                    learning_cmd::search(&cwd, &query, &mut stdout)?;
+                }
+                LearningCommand::Audit => learning_cmd::audit(&cwd, &mut stdout)?,
             }
         }
         Command::Export { session, out } => {

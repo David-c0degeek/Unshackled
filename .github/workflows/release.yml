@@ -30,7 +30,7 @@ jobs:
         with:
           toolchain: "1.82"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p unshackled --features tui
+      - run: cargo build --release --locked -p unshackled --features tui,learning
       # Stage the binary alongside the license files so every archive ships them.
       - name: stage (unix)
         if: runner.os != 'Windows'
