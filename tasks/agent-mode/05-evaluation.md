@@ -15,12 +15,12 @@ same observable dependability envelope through original implementation.
       `tasks/agent-mode/behavior-requirements.md`; do not copy or paraphrase
       output, prompts, schemas, tests, identifiers, internal traces, or
       implementation details. Artefact: a scenario matrix with provenance.
-- [ ] **05.2** (agent) Define the failure taxonomy and scorecard categories:
+- [x] **05.2** (agent) Define the failure taxonomy and scorecard categories:
       malformed tool call, stalled loop, context loss, bad edit, permission
       denial, timeout, provider parse issue, final-answer pollution,
       local-model quality limit, user interruption, and accepted limitation.
       Artefact: scorecard fields used by automated and manual runs.
-- [ ] **05.3** (agent) Define a small set of golden agent tasks on a throwaway
+- [x] **05.3** (agent) Define a small set of golden agent tasks on a throwaway
       repo (e.g. "add a failing test then make it pass", "fix a named bug",
       "rename a symbol across files"), each with an automatic pass check.
       Artefact: the task definitions + checks under the eval suite.
@@ -42,7 +42,7 @@ same observable dependability envelope through original implementation.
       (prompt, tool, loop, context, provider runtime) or recorded limitations
       (§4 decisions / `lessons.md`); re-run until the hosted-model success rate
       and maturity scorecard meet the agreed bar.
-- [ ] **05.9** (agent) Document how to run the eval and interpret the scorecard;
+- [x] **05.9** (agent) Document how to run the eval and interpret the scorecard;
       ensure the offline suite stays green and the live path stays opt-in.
 
 ## Hindsight checkpoint
@@ -51,3 +51,6 @@ same observable dependability envelope through original implementation.
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-03 · offline evals · 05.2, 05.3, 05.9 · failure modes and golden tasks are documented in behavior requirements and covered by the offline eval suite; provider docs describe the opt-in live path · verified with `cargo test -p unshackled-harness`.
+- 2026-06-03 · live eval scope · 05.1, 05.4-05.8 · mature-fork scenario catalog, real hosted/local runs, comparison, and failure triage remain open/manual.

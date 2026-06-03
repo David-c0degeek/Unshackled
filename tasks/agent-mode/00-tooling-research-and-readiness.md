@@ -11,25 +11,25 @@ provenance discipline already in place.
       ADR-0004/0005, and the read-only-reference policy; record the exact
       clean-room constraints that bind this plan (no copied prompts/code/
       identifiers/UI copy; behavior reference only; official APIs/local servers).
-- [ ] **00.2** (agent) Distill any needed mature-CLI observations into neutral
+- [x] **00.2** (agent) Distill any needed mature-CLI observations into neutral
       behavior requirements in `tasks/agent-mode/behavior-requirements.md`.
       Prefer black-box observation; write only observable outcomes and edge
       cases. Do not transcribe, paraphrase, or derive prompts, schemas, tests,
       identifiers, user-facing text, file layout, or implementation details from
       the reference.
-- [ ] **00.3** (agent) Inventory the agent-mode surfaces this plan touches:
+- [x] **00.3** (agent) Inventory the agent-mode surfaces this plan touches:
       `unshackled-harness` (`session.rs` loop, recovery, compaction),
       `unshackled-tools`, `unshackled-llm` (provider trait + adapters),
       `unshackled-cli` (chat/print). Note the existing tool list and the current
       agent system prompt (or its absence).
-- [ ] **00.4** (agent) Run the local gate (`fmt --check`, clippy, per-crate
+- [x] **00.4** (agent) Run the local gate (`fmt --check`, clippy, per-crate
       tests, check) and record the baseline green state and any windows-gnu
       caveats.
 - [ ] **00.5** (agent) Research current best practices for agentic tool-use
       loops, tool-result formatting, and system-prompt design from primary
       sources; record only findings that change this plan. **Do not** transcribe
       any third-party prompt.
-- [ ] **00.6** (agent) Confirm the documented public env-var/header conventions
+- [x] **00.6** (agent) Confirm the documented public env-var/header conventions
       to support (Anthropic `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`; OpenAI
       `OPENAI_BASE_URL`/`OPENAI_API_KEY`) with links and versions.
 - [ ] **00.7** (agent) Decide which assistant skills / MCP servers / local tools
@@ -45,3 +45,6 @@ provenance discipline already in place.
 
 ## Progress log
 > One line per slice. Date · slice · box IDs · what shipped · how verified.
+
+- 2026-06-03 · readiness subset · 00.2, 00.3, 00.4, 00.6 · recorded neutral behavior requirements, inventoried touched runtime/tool/provider/CLI surfaces, verified local gates, and implemented public provider env conventions · verified with focused tests, `cargo check --workspace`, `cargo fmt --check`, and clippy.
+- 2026-06-03 · remaining readiness · 00.1, 00.5, 00.7-00.9 · full clean-room input review, broader primary-source prompt/tool-loop research log, tooling classification, setup notes, and final readiness summary remain open.

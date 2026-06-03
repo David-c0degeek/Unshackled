@@ -87,18 +87,19 @@ forward the hard-earned behavioral lessons:
 
 | ID | Date | Title | Decision | Rationale | Refs (box IDs / files) |
 |---|---|---|---|---|---|
-| D001 | | | | | |
+| D001 | 2026-06-03 | Defer network fetch tool | Deferred. | The existing command/tool surface can perform approved network operations through classified shell commands. A first-class fetch tool needs a separate network policy and enablement story, so it should not be bundled into this polish pass. | 02.4 |
+| D002 | 2026-06-03 | Defer sub-task delegation primitive | Deferred. | Single-agent tool use, recovery, provider runtime, and context handling are the current maturity gap. Delegation would introduce orchestration behavior outside the scoped operating mode. | 02.5 |
 
 ## 5. Master progress tracker
 
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
-| [ ] | 00 | `tasks/agent-mode/00-tooling-research-and-readiness.md` | TODO | agent: 9 | n/a |
-| [ ] | 01 | `tasks/agent-mode/01-system-prompt-and-loop.md` | TODO | TBD | TBD |
-| [ ] | 02 | `tasks/agent-mode/02-tool-surface.md` | TODO | TBD | TBD |
-| [ ] | 03 | `tasks/agent-mode/03-provider-runtime.md` | TODO | TBD | TBD |
-| [ ] | 04 | `tasks/agent-mode/04-context-management.md` | TODO | TBD | TBD |
-| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | TODO | agent: 6; release-engineer: 3 | yes |
+| [ ] | 00 | `tasks/agent-mode/00-tooling-research-and-readiness.md` | PARTIAL | agent: 4 done; 5 open | n/a |
+| [x] | 01 | `tasks/agent-mode/01-system-prompt-and-loop.md` | DONE | agent: 6 done | n/a |
+| [x] | 02 | `tasks/agent-mode/02-tool-surface.md` | DONE | agent: 4 implemented; 2 deferred by §4 decision | n/a |
+| [ ] | 03 | `tasks/agent-mode/03-provider-runtime.md` | PARTIAL | agent: 5 done; live gateway verification open | n/a |
+| [ ] | 04 | `tasks/agent-mode/04-context-management.md` | PARTIAL | agent: 3 done; full boundary session regression open | n/a |
+| [ ] | 05 | `tasks/agent-mode/05-evaluation.md` | PARTIAL | agent: offline eval/docs done; live and maturity benchmark open | yes |
 
 ## 6. Cross-cutting principles
 
