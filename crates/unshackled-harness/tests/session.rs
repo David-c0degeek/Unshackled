@@ -247,6 +247,30 @@ async fn context_usage_event_is_emitted_before_request() {
 }
 
 #[tokio::test]
+async fn context_boundary_compacts_and_continues_the_turn() {
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call("c1", "read_file", json!({ "path": "src/lib.rs" }))
+            .text("continued after compaction"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[("src/lib.rs", "hello")],
+        SessionConfig {
+            context_token_limit: 1_000,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    let prompt = format!("read the file\n{}", "large context ".repeat(2_000));
+    let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+
+    assert_eq!(reason, StopReason::Done);
+    assert_eq!(provider.requests().len(), 2);
+}
+
+#[tokio::test]
 async fn malformed_tool_call_is_reported_and_reprompted() {
     let provider = FakeProvider::new()
         .tool_call("", "read_file", json!({ "path": "a" }))
