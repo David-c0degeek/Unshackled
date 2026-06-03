@@ -107,6 +107,12 @@ pub struct AppState {
     pub picker: Option<Picker>,
     pub search: Option<String>,
     pub should_quit: bool,
+    /// Whether a turn is in flight (drives the working indicator).
+    pub busy: bool,
+    /// Animation frame for the working spinner, advanced by the host each tick.
+    pub spinner: usize,
+    /// Seconds elapsed in the in-flight turn, updated by the host each tick.
+    pub working_secs: u64,
 }
 
 impl AppState {
@@ -126,6 +132,9 @@ impl AppState {
             picker: None,
             search: None,
             should_quit: false,
+            busy: false,
+            spinner: 0,
+            working_secs: 0,
         }
     }
 
@@ -157,6 +166,10 @@ impl AppState {
                 self.footer.tokens_per_sec = tokens_per_sec;
             }
             UiEvent::QuotaPaused { reset } => self.footer.quota_reset = Some(reset),
+            UiEvent::Notice(text) => self.transcript.push(TranscriptLine {
+                speaker: "system".to_string(),
+                text,
+            }),
             UiEvent::ApprovalRequested(request) => self.approval = Some(request),
             UiEvent::ApprovalResolved => self.approval = None,
             UiEvent::ToggleThinking => self.thinking.visible = !self.thinking.visible,
@@ -180,6 +193,8 @@ pub enum UiEvent {
     QuotaPaused {
         reset: String,
     },
+    /// A system notice (warning or error) to show in the transcript.
+    Notice(String),
     ApprovalRequested(ApprovalRequest),
     ApprovalResolved,
     ToggleThinking,
