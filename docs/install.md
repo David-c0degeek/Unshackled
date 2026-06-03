@@ -3,9 +3,22 @@
 Unshackled is a Rust-native, provider-neutral coding-agent harness for Windows,
 Linux, and macOS (all tier-1).
 
-## From source (recommended for alpha)
+## Requirements
 
-Requires the Rust toolchain (`cargo`, MSRV 1.82) from <https://rustup.rs>.
+- The Rust toolchain (`cargo`, MSRV 1.82) from <https://rustup.rs>.
+- `git` (the LocalMind learning engine is a submodule).
+- A C compiler for the `learning` feature, which builds SQLite: `cc`/`clang` on
+  Linux/macOS, the MSVC C++ build tools on Windows.
+
+Clone with submodules (or initialize them after cloning):
+
+```sh
+git clone --recurse-submodules https://github.com/David-c0degeek/Unshackled-Rust
+# or, in an existing clone:
+git submodule update --init --recursive
+```
+
+## From source (recommended for alpha)
 
 ```sh
 # Linux / macOS
@@ -15,7 +28,8 @@ Requires the Rust toolchain (`cargo`, MSRV 1.82) from <https://rustup.rs>.
 ./install/install.ps1
 ```
 
-Both wrap `cargo install --path crates/unshackled-cli --locked`. After install:
+Both build a full binary (`--features tui,learning`) and run
+`cargo install --path crates/unshackled-cli --locked`. After install:
 
 ```sh
 unshackled doctor
@@ -24,6 +38,37 @@ unshackled doctor
 `doctor` reports your platform, the config search paths, which provider
 credentials are present (never their values), tool availability, and workspace
 trust state.
+
+### Build features
+
+The default binary is lean. The installers enable two opt-in features:
+
+- `tui` — the interactive `chat` REPL.
+- `learning` — the LocalMind learning subsystem (links the vendored crates and
+  SQLite).
+
+Pick a different set when you don't want one:
+
+```sh
+# Linux / macOS — skip the interactive TUI:
+UNSHACKLED_FEATURES=learning ./install/install.sh
+
+# Windows — skip learning (no SQLite/C-compiler requirement):
+./install/install.ps1 -Features tui
+```
+
+### Windows: use the MSVC toolchain for `chat`
+
+The interactive TUI is unstable under the `windows-gnu` toolchain. `install.ps1`
+automatically builds with the MSVC toolchain when it is installed; install it if
+needed:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-msvc
+```
+
+If you only need non-interactive commands (`ask`, `print`, `harness`, `memory`,
+`learning`), the gnu toolchain is fine — run with `-Features learning`.
 
 ## From a release archive
 
@@ -42,4 +87,5 @@ cargo install unshackled
 ## Next steps
 
 - Configure a provider — see [providers.md](providers.md).
+- Connect MCP tool servers — see [mcp.md](mcp.md).
 - Read the security model — see [security.md](security.md).
