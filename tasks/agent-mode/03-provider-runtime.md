@@ -42,3 +42,5 @@ slow local models, and reasoning models that emit `<think>` content.
 
 - 2026-06-03 · provider runtime · 03.1-03.5 · added public env fallbacks, request timeout config/default, inline thinking routing, and suppress-thinking request shaping · verified with config and provider adapter tests.
 - 2026-06-03 · provider docs · 03.6 · documented setup paths in `docs/providers.md`; live local OpenAI-compatible and Anthropic-compatible gateway verification remains open.
+
+- 2026-06-03 · localbox drop-in · 03.1, 03.2 · env-synthesized provider, ANTHROPIC_AUTH_TOKEN credential fallback, and /v1/messages endpoint normalization · verified with config + anthropic endpoint tests.
