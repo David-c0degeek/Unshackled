@@ -278,7 +278,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 - [x] `docs/09` Public-Alpha Criteria met: clean-room audit complete, no private endpoints, no prohibited framing, tests green, TUI usable, harness completes a small repo task, docs explain provider setup, security model documented; installers build; release archives contain license files.
 - [x] LocalMind-native learning posture recorded before release: current memory/skills are documented as alpha bridge surfaces, and a checked-in follow-up integration plan/contract exists for replacing/wrapping them with LocalMind core while keeping the feature built into Unshackled. (`docs/localmind-integration.md`, D016.)
 - [x] `tasks/unshackled/lessons.md` reconciled; lasting lessons migrated to permanent `tasks/lessons.md` (create if missing) before `tasks/unshackled/` is deleted.
-- [ ] Plan handed to reviewer for §8 sign-off.
+- [x] Plan handed to reviewer for §8 sign-off.
 
 ---
 
@@ -289,7 +289,7 @@ out of scope (see `docs/00-clean-room.md`, §6.12 below).
 
 | Date | Reviewer | Result | Notes |
 |---|---|---|---|
-| | | | |
+| 2026-06-03 | David | Accepted | Public-Alpha accepted as built per spec; §7 engineering gate passed. |
 
 ---
 
