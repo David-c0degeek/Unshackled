@@ -17,8 +17,10 @@ ignore = [
     # time 0.3.37 (transitive via the LocalMind submodule, which pins it
     # exactly): a stack-exhaustion DoS reachable only by parsing maliciously
     # crafted RFC 2822 input. LocalMind formats/parses its own timestamps and
-    # never parses untrusted RFC 2822, so it is unreachable here. Clear by
-    # bumping the submodule's `time` pin to >= 0.3.47 upstream.
+    # never parses untrusted RFC 2822, so it is unreachable here. The fix (time
+    # >= 0.3.47) requires edition 2024 / Rust 1.88, above this project's MSRV
+    # 1.82, so it cannot be adopted without raising the MSRV workspace-wide;
+    # revisit when the MSRV is bumped.
     "RUSTSEC-2026-0009",
 ]
 
