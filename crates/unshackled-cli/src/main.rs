@@ -9,6 +9,7 @@ use unshackled_core::{Message, Role, SessionId};
 use unshackled_llm::{ModelEvent, ModelRequest, ProviderRegistry};
 use unshackled_store::Store;
 
+mod context_inject;
 mod doctor;
 mod harness_cmd;
 #[cfg(feature = "learning")]

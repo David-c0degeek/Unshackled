@@ -86,8 +86,10 @@ depends on LocalMind, never the reverse.
 2. **Done — CLI surface.** `unshackled learning` (behind the `learning` feature)
    exposes the loop: `closeout`, `review {list,show,accept,reject,defer,edit}`,
    `promote`, `search`, `audit`. State is project-local under `.localmind/`.
-3. Inject retrieved context before agent turns; auto-trigger closeout at session
-   end.
+3. **Done — retrieval + closeout trigger.** Relevant accepted memory is injected
+   as a system message before each turn (REPL, `print`, and each harness step);
+   the interactive REPL closes the session out into LocalMind on exit. Both are
+   no-ops without the `learning` feature or matching memory.
 4. Reduce `unshackled-memory` / `unshackled-skills` to thin shims over the adapter
    (or remove them) once parity is reached — keeping the feature built-in.
 5. No separate install: the LocalMind crates are bundled into the binary.

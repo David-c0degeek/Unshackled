@@ -15,8 +15,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 pub use ops::{
-    audit, promote, review_decide, review_list, review_show, search, AuditEntry, ReviewSummary,
-    ReviewVerdict, SearchHit,
+    audit, context_for, promote, review_decide, review_list, review_show, search, AuditEntry,
+    ReviewSummary, ReviewVerdict, SearchHit,
 };
 
 use localmind_core::{SessionId as LearningSessionId, SessionSource};

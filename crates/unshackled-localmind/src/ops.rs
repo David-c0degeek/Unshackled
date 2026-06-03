@@ -153,6 +153,28 @@ pub fn search(project_root: &Path, query: &str) -> Result<Vec<SearchHit>, Learni
         .collect())
 }
 
+/// Retrieve relevant accepted memory for `query`, formatted as a compact context
+/// block to seed into an agent turn. Returns `None` when nothing matches, so the
+/// caller injects nothing rather than noise.
+///
+/// # Errors
+/// Returns [`LearningError::Context`] if memory cannot be searched.
+pub fn context_for(project_root: &Path, query: &str) -> Result<Option<String>, LearningError> {
+    use std::fmt::Write as _;
+    let persistence = open_memory(project_root)?;
+    let hits = persistence
+        .search(query)
+        .map_err(|e| LearningError::Context(e.to_string()))?;
+    if hits.is_empty() {
+        return Ok(None);
+    }
+    let mut context = String::from("Relevant accepted project memory:\n");
+    for hit in hits.iter().take(5) {
+        let _ = writeln!(context, "- {}", hit.snippet.trim());
+    }
+    Ok(Some(context))
+}
+
 /// The memory-change audit log.
 ///
 /// # Errors
