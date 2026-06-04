@@ -5,6 +5,10 @@ stability policy is in [docs/configuration.md](docs/configuration.md).
 
 ## Unreleased
 
+- Fixed interactive input editing: the caret is visible, and Left/Right,
+  Home/End, Backspace, Delete, newlines, and pastes edit at the cursor. Provider
+  streams that disconnect before a completion marker now recover instead of
+  persisting a visibly truncated response as complete.
 - Made the session context budget configurable with `[harness]
   context_token_limit` (default 24000) so a model's full context window is used
   for compaction instead of a fixed default.

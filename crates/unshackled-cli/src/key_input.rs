@@ -32,15 +32,6 @@ pub(crate) fn is_newline(key: KeyEvent, input: &str) -> bool {
     }
 }
 
-/// Insert a newline, consuming a trailing `\` continuation marker if one is present.
-pub(crate) fn insert_newline(input: &mut String) {
-    let kept = input.trim_end_matches(' ').len();
-    if input[..kept].ends_with('\\') {
-        input.truncate(kept - 1);
-    }
-    input.push('\n');
-}
-
 fn ends_with_continuation(input: &str) -> bool {
     input.trim_end_matches(' ').ends_with('\\')
 }

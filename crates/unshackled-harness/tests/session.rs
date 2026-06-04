@@ -336,6 +336,35 @@ async fn reasoning_is_emitted_as_metadata_distinct_from_text() {
 }
 
 #[tokio::test]
+async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() {
+    let provider = FakeProvider::new()
+        .script(vec![Ok(ModelEvent::TextDelta(
+            "Let me start by understanding the p".to_string(),
+        ))])
+        .text("The complete answer.");
+    let mut h = build(provider, &[], SessionConfig::default());
+    let mut rx = h.events.subscribe();
+
+    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+
+    let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
+    assert_eq!(transcript.len(), 2);
+    let assistant_text = transcript[1]
+        .content
+        .iter()
+        .find_map(|block| match block {
+            unshackled_core::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(assistant_text, "The complete answer.");
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|event| matches!(event, RuntimeEvent::Recovery { .. })));
+}
+
+#[tokio::test]
 async fn a_denied_tool_call_becomes_an_error_result_not_a_crash() {
     // A destructive shell command, non-interactive, is denied; the loop keeps
     // going and the next turn produces a final answer.

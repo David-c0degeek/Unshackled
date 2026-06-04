@@ -17,9 +17,14 @@ pub enum Key {
     Char(char),
     Enter,
     Backspace,
+    Delete,
     Esc,
     Up,
     Down,
+    Left,
+    Right,
+    Home,
+    End,
     CtrlC,
 }
 
@@ -105,10 +110,13 @@ fn handle_key(state: &mut AppState, key: Key) {
     match key {
         Key::Esc | Key::CtrlC => state.should_quit = true,
         Key::Enter => submit_input(state),
-        Key::Backspace => {
-            state.input.pop();
-        }
-        Key::Char(c) => state.input.push(c),
+        Key::Backspace => state.backspace_input(),
+        Key::Delete => state.delete_input(),
+        Key::Left => state.move_input_left(),
+        Key::Right => state.move_input_right(),
+        Key::Home => state.move_input_home(),
+        Key::End => state.move_input_end(),
+        Key::Char(c) => state.insert_input(&c.to_string()),
         _ => {}
     }
 }
@@ -205,5 +213,26 @@ mod tests {
         // Still gated; the stray key did not leak into the input.
         assert!(state.trust.is_some());
         assert!(state.input.is_empty());
+    }
+
+    #[test]
+    fn navigation_keys_edit_the_middle_of_input() {
+        let mut state = state();
+        state.trust = None;
+        for key in [
+            Key::Char('a'),
+            Key::Char('b'),
+            Key::Char('d'),
+            Key::Left,
+            Key::Char('c'),
+            Key::Home,
+            Key::Delete,
+            Key::End,
+            Key::Backspace,
+        ] {
+            handle_key(&mut state, key);
+        }
+        assert_eq!(state.input, "bc");
+        assert_eq!(state.input_cursor, state.input.len());
     }
 }

@@ -1,7 +1,7 @@
 //! TUI render snapshots and event-loop behaviour.
 #![allow(clippy::unwrap_used)]
 
-use ratatui::backend::TestBackend;
+use ratatui::backend::{Backend, TestBackend};
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 use unshackled_tui::{
@@ -198,4 +198,19 @@ fn picker_selection_moves_and_search_highlights() {
     state.search = Some("parser".to_string());
     let rendered = render_string(&state, 90, 18);
     assert!(rendered.contains("search: parser"));
+}
+
+#[test]
+fn input_cursor_is_visible_at_the_edit_position() {
+    let mut state = base();
+    state.input = "abcd".to_string();
+    state.input_cursor = 2;
+    let mut terminal = Terminal::new(TestBackend::new(90, 18)).unwrap();
+    terminal.draw(|frame| render(frame, &state)).unwrap();
+
+    // Input box starts at row 13 in this layout; its content starts at x=1,y=14.
+    assert_eq!(
+        terminal.backend_mut().get_cursor_position().unwrap(),
+        ratatui::layout::Position::new(3, 14)
+    );
 }

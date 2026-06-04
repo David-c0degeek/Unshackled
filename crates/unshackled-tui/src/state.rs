@@ -124,6 +124,8 @@ pub struct AppState {
     pub transcript: Vec<TranscriptLine>,
     pub streaming: String,
     pub input: String,
+    /// UTF-8 byte offset where the next input edit occurs.
+    pub input_cursor: usize,
     pub footer: FooterStats,
     pub thinking: ThinkingPanel,
     pub mode: Mode,
@@ -157,6 +159,7 @@ impl AppState {
             transcript: Vec::new(),
             streaming: String::new(),
             input: String::new(),
+            input_cursor: 0,
             footer: FooterStats::default(),
             thinking: ThinkingPanel::default(),
             mode,
@@ -187,6 +190,91 @@ impl AppState {
         placeholder
     }
 
+    /// Insert text at the current input cursor and advance past it.
+    pub fn insert_input(&mut self, text: &str) {
+        self.normalize_input_cursor();
+        self.input.insert_str(self.input_cursor, text);
+        self.input_cursor += text.len();
+    }
+
+    /// Insert a newline at the cursor. At the end of the input, a trailing
+    /// continuation marker and spaces are consumed first.
+    pub fn insert_input_newline(&mut self) {
+        self.normalize_input_cursor();
+        if self.input_cursor == self.input.len() {
+            let kept = self.input.trim_end_matches(' ').len();
+            if self.input[..kept].ends_with('\\') {
+                self.input.truncate(kept - 1);
+                self.input_cursor = self.input.len();
+            }
+        }
+        self.insert_input("\n");
+    }
+
+    /// Move the cursor one character left.
+    pub fn move_input_left(&mut self) {
+        self.normalize_input_cursor();
+        if let Some((offset, _)) = self.input[..self.input_cursor].char_indices().next_back() {
+            self.input_cursor = offset;
+        }
+    }
+
+    /// Move the cursor one character right.
+    pub fn move_input_right(&mut self) {
+        self.normalize_input_cursor();
+        if let Some(ch) = self.input[self.input_cursor..].chars().next() {
+            self.input_cursor += ch.len_utf8();
+        }
+    }
+
+    /// Move the cursor to the start of its logical line.
+    pub fn move_input_home(&mut self) {
+        self.normalize_input_cursor();
+        self.input_cursor = self.input[..self.input_cursor]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+    }
+
+    /// Move the cursor to the end of its logical line.
+    pub fn move_input_end(&mut self) {
+        self.normalize_input_cursor();
+        self.input_cursor = self.input[self.input_cursor..]
+            .find('\n')
+            .map_or(self.input.len(), |offset| self.input_cursor + offset);
+    }
+
+    /// Delete the character immediately before the cursor.
+    pub fn backspace_input(&mut self) {
+        self.normalize_input_cursor();
+        if let Some((offset, _)) = self.input[..self.input_cursor].char_indices().next_back() {
+            self.input.drain(offset..self.input_cursor);
+            self.input_cursor = offset;
+        }
+    }
+
+    /// Delete the character under the cursor.
+    pub fn delete_input(&mut self) {
+        self.normalize_input_cursor();
+        if let Some(ch) = self.input[self.input_cursor..].chars().next() {
+            self.input
+                .drain(self.input_cursor..self.input_cursor + ch.len_utf8());
+        }
+    }
+
+    /// A valid UTF-8 byte offset for rendering the input cursor.
+    #[must_use]
+    pub fn normalized_input_cursor(&self) -> usize {
+        let mut cursor = self.input_cursor.min(self.input.len());
+        while !self.input.is_char_boundary(cursor) {
+            cursor = cursor.saturating_sub(1);
+        }
+        cursor
+    }
+
+    fn normalize_input_cursor(&mut self) {
+        self.input_cursor = self.normalized_input_cursor();
+    }
+
     /// Restore any collapsed pastes in `text` to their full content.
     #[must_use]
     pub fn expand_pastes(&self, text: &str) -> String {
@@ -200,6 +288,7 @@ impl AppState {
     /// Take the current input, restoring collapsed pastes, and clear the set.
     pub fn take_input_expanded(&mut self) -> String {
         let raw = std::mem::take(&mut self.input);
+        self.input_cursor = 0;
         let expanded = self.expand_pastes(&raw);
         self.pastes.clear();
         expanded
@@ -348,5 +437,36 @@ mod tests {
         assert!(second.contains("2 pasted rows"));
         assert!(first.contains("#1"));
         assert!(second.contains("#2"));
+    }
+
+    #[test]
+    fn input_edits_follow_the_cursor_on_utf8_boundaries() {
+        let mut state = state();
+        state.insert_input("aéz");
+        state.move_input_left();
+        state.move_input_left();
+        state.insert_input("B");
+        assert_eq!(state.input, "aBéz");
+
+        state.delete_input();
+        assert_eq!(state.input, "aBz");
+        state.backspace_input();
+        assert_eq!(state.input, "az");
+    }
+
+    #[test]
+    fn newline_at_the_cursor_and_continuation_at_the_end_are_supported() {
+        let mut state = state();
+        state.insert_input("abcd");
+        state.move_input_left();
+        state.move_input_left();
+        state.insert_input_newline();
+        assert_eq!(state.input, "ab\ncd");
+        assert_eq!(state.input_cursor, 3);
+
+        state.input = "next \\  ".to_string();
+        state.input_cursor = state.input.len();
+        state.insert_input_newline();
+        assert_eq!(state.input, "next \n");
     }
 }

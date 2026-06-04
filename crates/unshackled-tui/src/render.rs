@@ -2,7 +2,7 @@
 //! pure with respect to the state, so it snapshot-tests cleanly with a
 //! `TestBackend`.
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
@@ -69,7 +69,10 @@ fn wrapped_rows(text: &str, width: u16) -> usize {
 /// the content scrolls inside a fixed box, never starving the header/body/footer.
 fn input_box_height(state: &AppState, area: Rect) -> u16 {
     let inner_width = area.width.saturating_sub(2);
-    let text_rows = wrapped_rows(&state.input, inner_width).max(1) as u16;
+    let cursor_rows = input_cursor_position(state, inner_width).0 + 1;
+    let text_rows = (wrapped_rows(&state.input, inner_width) as u16)
+        .max(cursor_rows)
+        .max(1);
     // Leave room for header (3), footer (2), the body minimum (3), and this box's
     // own two border rows.
     let room = area.height.saturating_sub(3 + 2 + 3 + 2);
@@ -215,12 +218,10 @@ fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
     } else {
         "input  (Enter sends · Alt+Enter, Ctrl+J, or trailing \\ make a newline)".to_string()
     };
-    // Keep the end of the input visible: when the text is taller than the box,
-    // scroll so the most recently typed rows show.
     let inner_width = area.width.saturating_sub(2);
-    let total_rows = wrapped_rows(&state.input, inner_width) as u16;
+    let (cursor_row, cursor_col) = input_cursor_position(state, inner_width);
     let visible_rows = area.height.saturating_sub(2).max(1);
-    let scroll = total_rows.saturating_sub(visible_rows);
+    let scroll = cursor_row.saturating_add(1).saturating_sub(visible_rows);
     frame.render_widget(
         Paragraph::new(state.input.clone())
             .block(Block::bordered().title(title))
@@ -228,6 +229,34 @@ fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
             .scroll((scroll, 0)),
         area,
     );
+    if !state.busy && state.trust.is_none() && state.approval.is_none() && state.picker.is_none() {
+        frame.set_cursor_position(Position::new(
+            area.x.saturating_add(1).saturating_add(cursor_col),
+            area.y
+                .saturating_add(1)
+                .saturating_add(cursor_row.saturating_sub(scroll)),
+        ));
+    }
+}
+
+/// Visual row and column of the UTF-8 input cursor after wrapping.
+fn input_cursor_position(state: &AppState, width: u16) -> (u16, u16) {
+    let width = width.max(1);
+    let mut row = 0u16;
+    let mut col = 0u16;
+    for ch in state.input[..state.normalized_input_cursor()].chars() {
+        if ch == '\n' {
+            row = row.saturating_add(1);
+            col = 0;
+            continue;
+        }
+        col = col.saturating_add(1);
+        if col == width {
+            row = row.saturating_add(1);
+            col = 0;
+        }
+    }
+    (row, col)
 }
 
 fn render_trust(frame: &mut Frame, area: Rect, trust: &TrustPrompt) {
@@ -379,5 +408,12 @@ mod tests {
         let state = state_with_input("abcdefghijklmnopqrstuv");
         let area = Rect::new(0, 0, 12, 40);
         assert_eq!(input_box_height(&state, area), 5);
+    }
+
+    #[test]
+    fn cursor_position_tracks_wrapping_and_newlines() {
+        let mut state = state_with_input("abcd\nef");
+        state.input_cursor = state.input.len();
+        assert_eq!(input_cursor_position(&state, 3), (2, 2));
     }
 }
