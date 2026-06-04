@@ -227,6 +227,43 @@ impl AppState {
         }
     }
 
+    /// Move the cursor to the same character column on the previous logical line.
+    pub fn move_input_up(&mut self) {
+        self.normalize_input_cursor();
+        let current_start = self.input[..self.input_cursor]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        if current_start == 0 {
+            return;
+        }
+
+        let column = self.input[current_start..self.input_cursor].chars().count();
+        let previous_end = current_start - 1;
+        let previous_start = self.input[..previous_end]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        self.input_cursor = previous_start
+            + byte_offset_at_column(&self.input[previous_start..previous_end], column);
+    }
+
+    /// Move the cursor to the same character column on the next logical line.
+    pub fn move_input_down(&mut self) {
+        self.normalize_input_cursor();
+        let current_start = self.input[..self.input_cursor]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        let column = self.input[current_start..self.input_cursor].chars().count();
+        let Some(next_offset) = self.input[self.input_cursor..].find('\n') else {
+            return;
+        };
+        let next_start = self.input_cursor + next_offset + 1;
+        let next_end = self.input[next_start..]
+            .find('\n')
+            .map_or(self.input.len(), |offset| next_start + offset);
+        self.input_cursor =
+            next_start + byte_offset_at_column(&self.input[next_start..next_end], column);
+    }
+
     /// Move the cursor to the start of its logical line.
     pub fn move_input_home(&mut self) {
         self.normalize_input_cursor();
@@ -351,6 +388,12 @@ impl AppState {
     }
 }
 
+fn byte_offset_at_column(line: &str, column: usize) -> usize {
+    line.char_indices()
+        .nth(column)
+        .map_or(line.len(), |(offset, _)| offset)
+}
+
 /// A UI-facing event, mapped from the session runtime by the caller.
 #[derive(Debug, Clone)]
 pub enum UiEvent {
@@ -468,5 +511,24 @@ mod tests {
         state.input_cursor = state.input.len();
         state.insert_input_newline();
         assert_eq!(state.input, "next \n");
+    }
+
+    #[test]
+    fn vertical_input_movement_preserves_character_columns() {
+        let mut state = state();
+        state.input = "abé\nwxyz\nq".to_string();
+        state.input_cursor = "abé".len();
+
+        state.move_input_down();
+        assert_eq!(&state.input[..state.input_cursor], "abé\nwxy");
+
+        state.move_input_down();
+        assert_eq!(&state.input[..state.input_cursor], "abé\nwxyz\nq");
+
+        state.move_input_up();
+        assert_eq!(&state.input[..state.input_cursor], "abé\nw");
+
+        state.move_input_up();
+        assert_eq!(&state.input[..state.input_cursor], "a");
     }
 }

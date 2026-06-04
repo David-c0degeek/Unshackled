@@ -114,10 +114,11 @@ fn handle_key(state: &mut AppState, key: Key) {
         Key::Delete => state.delete_input(),
         Key::Left => state.move_input_left(),
         Key::Right => state.move_input_right(),
+        Key::Up => state.move_input_up(),
+        Key::Down => state.move_input_down(),
         Key::Home => state.move_input_home(),
         Key::End => state.move_input_end(),
         Key::Char(c) => state.insert_input(&c.to_string()),
-        _ => {}
     }
 }
 
@@ -234,6 +235,21 @@ mod tests {
         }
         assert_eq!(state.input, "bc");
         assert_eq!(state.input_cursor, state.input.len());
+    }
+
+    #[test]
+    fn vertical_navigation_keys_move_between_input_rows() {
+        let mut state = state();
+        state.trust = None;
+        state.input = "one\ntwo\nthree".to_string();
+        state.input_cursor = "one\ntw".len();
+
+        handle_key(&mut state, Key::Up);
+        assert_eq!(&state.input[..state.input_cursor], "on");
+
+        handle_key(&mut state, Key::Down);
+        handle_key(&mut state, Key::Down);
+        assert_eq!(&state.input[..state.input_cursor], "one\ntwo\nth");
     }
 
     #[test]
