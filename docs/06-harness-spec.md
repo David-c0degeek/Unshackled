@@ -63,38 +63,47 @@ no_stale_uncommitted = "block"
 decision_logged = "warn"
 quality_gate = "block"
 
-# Discovered, user-ratified quality gate. Each check is run through the
-# permission engine like any shell command. cadence: "step" | "phase".
+# Discovered, user-ratified quality gate, written by `harness gate ratify`. Each
+# check runs through the permission engine like any shell command. A check is a
+# program plus an argument list (no shell interpretation): `program` + `args`,
+# and `fix_program` + `fix_args` for an auto-fixer. cadence: "step" | "phase".
 # auto_fix: true | "safe" | false. severity maps a check's findings to a verdict.
 [[harness.checks]]
 name = "fmt"
-command = "cargo fmt --check"
-fix_command = "cargo fmt"
+program = "cargo"
+args = ["fmt", "--check"]
 cadence = "step"
 auto_fix = true
+fix_program = "cargo"
+fix_args = ["fmt"]
 
 [[harness.checks]]
 name = "clippy"
-command = "cargo clippy --workspace --all-targets -- -D warnings"
-fix_command = "cargo clippy --fix --allow-dirty --allow-staged"
+program = "cargo"
+args = ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
 cadence = "step"
 auto_fix = "safe"
+fix_program = "cargo"
+fix_args = ["clippy", "--fix", "--allow-dirty", "--allow-staged"]
 
 [[harness.checks]]
 name = "test"
-command = "cargo test --workspace"
+program = "cargo"
+args = ["test", "--workspace"]
 cadence = "phase"
 auto_fix = false
 
 [[harness.checks]]
 name = "deps"
-command = "cargo machete"
+program = "cargo"
+args = ["machete"]
 cadence = "phase"
 auto_fix = false
 
 [[harness.checks]]
 name = "audit"
-command = "cargo audit"
+program = "cargo"
+args = ["audit"]
 cadence = "phase"
 auto_fix = false
 severity = "block"   # advisory findings need a human/dependency decision
@@ -225,6 +234,19 @@ Output:
 - appended brief notes
 - appended or inserted progress steps
 
+### `unshackled harness gate`
+
+Inspect or ratify the discovered quality gate (no provider needed).
+
+- `gate propose` — read-only. Detects the stack, probes which tools are on
+  `PATH`, and prints the proposed checks with each command's risk class and an
+  explicit warning for a destructive/privileged/network command. Writes nothing.
+- `gate ratify` — writes the proposed checks into `.unshackled.toml` as
+  `[[harness.checks]]`, adding only checks not already ratified and preserving
+  the rest of the config. Ratification is the trust boundary: a discovered check
+  does not run until it is committed here. A re-probe proposes additions; it
+  never auto-adopts them.
+
 ### `unshackled harness status`
 
 Read-only summary:
@@ -234,6 +256,7 @@ Read-only summary:
 - completed count
 - dirty state
 - test command
+- ratified quality gate
 - provider config status
 
 ## Rule Engine
