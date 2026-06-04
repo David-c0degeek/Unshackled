@@ -10,13 +10,13 @@ use serde_json::json;
 use unshackled_config::{AutoFix, Cadence, CheckConfig, RuleSeverity};
 use unshackled_harness::{
     decide_step, resume_one_step, CheckRunner, CompletionInputs, RuleEngine, SessionConfig,
-    SessionRuntime, StepAction,
+    SessionRuntime, StepAction, QUALITY_CHECK_TOOL,
 };
 use unshackled_llm::FakeProvider;
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{
-    classify_posix, classify_windows, CommandClass, Interactivity, PermissionEngine, Profile,
-    ScriptedApprover, Workspace,
+    classify_posix, classify_windows, CommandClass, Decision, Effect, Interactivity,
+    PermissionEngine, PermissionRequest, Profile, ScriptedApprover, Workspace,
 };
 use unshackled_store::Store;
 use unshackled_tools::ToolRegistry;
@@ -311,4 +311,60 @@ async fn act_on_findings_is_cross_platform() {
         decide_step(&rules, &inputs, vec![outcome]),
         StepAction::Retry(_)
     ));
+}
+
+#[test]
+fn ratification_allowance_lets_the_gate_run_headless_but_grants_nothing_else() {
+    // D005: ratifying the gate grants its tool identity a relaxed allowance, so a
+    // project-write check (e.g. `cargo fmt`) runs non-interactively. The allowance
+    // is keyed to the gate identity, so it never authorizes arbitrary shell.
+    let request = |tool: &'static str| PermissionRequest {
+        tool,
+        effect: Effect::RunCommand(CommandClass::ProjectWrite),
+        interactivity: Interactivity::NonInteractive,
+        trusted: true,
+        detail: String::new(),
+    };
+
+    let with_allowance =
+        PermissionEngine::new(Profile::Relaxed, vec![QUALITY_CHECK_TOOL.to_string()]);
+    assert_eq!(
+        with_allowance.decide(&request(QUALITY_CHECK_TOOL)),
+        Decision::Allow
+    );
+    // The allowance does not leak to a general shell tool identity.
+    assert_eq!(with_allowance.decide(&request("run_shell")), Decision::Deny);
+
+    // Without ratification there is no allowance: the same check is denied.
+    let without = PermissionEngine::new(Profile::Relaxed, Vec::new());
+    assert_eq!(without.decide(&request(QUALITY_CHECK_TOOL)), Decision::Deny);
+}
+
+#[tokio::test]
+async fn an_unratified_check_never_runs() {
+    // Security boundary: `resume_one_step` runs only the checks it is handed (the
+    // ratified gate). Discovery's proposal is never executed — passing an empty
+    // gate means no check runs, even in a repo a profile would propose checks for.
+    let dir = sample_repo();
+    let root = dir.path();
+    std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call(
+                "c1",
+                "write_file",
+                json!({ "path": "x.txt", "content": "x" }),
+            )
+            .text("done"),
+    );
+    let mut rt = runtime(root, Arc::clone(&provider));
+
+    let rules = RuleEngine::with_baseline(&Default::default());
+    let outcome = resume_one_step(&mut rt, root, &rules, None, &[], 3)
+        .await
+        .unwrap();
+
+    assert!(outcome.committed, "{:?}", outcome.blocked_reason);
+    assert!(outcome.gate.is_empty(), "no unratified check should run");
 }
