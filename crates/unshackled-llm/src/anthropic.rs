@@ -375,6 +375,7 @@ struct SseDecoder {
     input_tokens: u64,
     done: bool,
     warned_stop_reason: bool,
+    saw_stop_reason: bool,
 }
 
 #[derive(Default)]
@@ -398,7 +399,16 @@ impl SseDecoder {
             let line = std::mem::take(&mut self.buf);
             self.process_line(line.trim(), out);
         }
-        self.emit_done(out);
+        if !self.done {
+            if self.saw_stop_reason {
+                self.emit_done(out);
+            } else {
+                self.done = true;
+                out.push_back(Err(ProviderError::StreamDecode(
+                    "stream ended before a completion marker".to_string(),
+                )));
+            }
+        }
     }
 
     fn emit_done(&mut self, out: &mut EventQueue) {
@@ -458,6 +468,7 @@ impl SseDecoder {
                     })));
                 }
                 if let Some(reason) = event["delta"]["stop_reason"].as_str() {
+                    self.saw_stop_reason = true;
                     self.warn_for_stop_reason(reason, out);
                 }
             }
@@ -687,6 +698,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_text_when_transport_ends_before_a_completion_marker() {
+        let events = collect_sse(&[
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Let me start by understanding the p\"}}\n",
+        ]);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Err(ProviderError::StreamDecode(message))
+                if message.contains("completion marker")
+        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, Ok(ModelEvent::Done))));
+    }
+
+    #[test]
+    fn stop_reason_is_a_completion_marker_for_compatible_servers() {
+        let events = collect_sse(&[
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n",
+        ]);
+        assert!(matches!(events.last(), Some(Ok(ModelEvent::Done))));
+    }
+
+    #[test]
     fn endpoint_normalizes_to_v1_messages() {
         // Both the SDK convention (no `/v1`) and an explicit `/v1` base resolve
         // to the documented `/v1/messages` path.
@@ -805,9 +839,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn into_event_stream_emits_done_on_empty_body() {
+    async fn into_event_stream_rejects_an_empty_body_without_a_completion_marker() {
         let body = futures::stream::iter(Vec::<reqwest::Result<Vec<u8>>>::new());
         let events: Vec<_> = into_event_stream(body).collect().await;
-        assert!(matches!(events.last(), Some(Ok(ModelEvent::Done))));
+        assert!(matches!(
+            events.last(),
+            Some(Err(ProviderError::StreamDecode(message)))
+                if message.contains("completion marker")
+        ));
     }
 }

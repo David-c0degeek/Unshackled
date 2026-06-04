@@ -56,9 +56,7 @@ fn ctrl_c_cancels() {
 #[test]
 fn trailing_backslash_keeps_plain_enter_as_newline() {
     let event = key(KeyCode::Enter, KeyModifiers::empty());
-    let mut input = "hello \\".to_string();
+    let input = "hello \\".to_string();
     assert!(key_input::is_newline(event, &input));
     assert!(!key_input::is_submit(event, &input));
-    key_input::insert_newline(&mut input);
-    assert_eq!(input, "hello \n");
 }

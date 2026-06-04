@@ -370,6 +370,7 @@ struct SseDecoder {
     buf: String,
     tools: BTreeMap<u32, ToolAccum>,
     warned_finish_reasons: BTreeSet<String>,
+    saw_finish_reason: bool,
     done: bool,
 }
 
@@ -395,7 +396,16 @@ impl SseDecoder {
             self.process_line(line.trim(), out);
         }
         self.flush_tools(out);
-        self.emit_done(out);
+        if !self.done {
+            if self.saw_finish_reason {
+                self.emit_done(out);
+            } else {
+                self.done = true;
+                out.push_back(Err(ProviderError::StreamDecode(
+                    "stream ended before a completion marker".to_string(),
+                )));
+            }
+        }
     }
 
     fn emit_done(&mut self, out: &mut EventQueue) {
@@ -462,6 +472,7 @@ impl SseDecoder {
                 }
             }
             if let Some(reason) = choice["finish_reason"].as_str() {
+                self.saw_finish_reason = true;
                 if reason == "tool_calls" {
                     self.flush_tools(out);
                 }
@@ -704,9 +715,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn into_event_stream_emits_done_on_empty_body() {
+    async fn into_event_stream_rejects_an_empty_body_without_a_completion_marker() {
         let body = futures::stream::iter(Vec::<reqwest::Result<Vec<u8>>>::new());
         let events: Vec<_> = into_event_stream(body).collect().await;
+        assert!(matches!(
+            events.last(),
+            Some(Err(ProviderError::StreamDecode(message)))
+                if message.contains("completion marker")
+        ));
+    }
+
+    #[test]
+    fn rejects_text_when_transport_ends_before_a_completion_marker() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Let me start by understanding the p\"}}]}\n",
+        ]);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Err(ProviderError::StreamDecode(message))
+                if message.contains("completion marker")
+        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, Ok(ModelEvent::Done))));
+    }
+
+    #[test]
+    fn finish_reason_is_a_completion_marker_for_compatible_servers() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n",
+        ]);
         assert!(matches!(events.last(), Some(Ok(ModelEvent::Done))));
     }
 }

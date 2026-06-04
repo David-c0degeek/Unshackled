@@ -345,7 +345,13 @@ impl SessionRuntime {
                             stream_failed = true;
                             break;
                         }
-                        None => break,
+                        None => {
+                            let _ = events.send(RuntimeEvent::Warning(
+                                "stream ended before a completion marker".to_string(),
+                            ));
+                            stream_failed = true;
+                            break;
+                        },
                     }
                 }
             }

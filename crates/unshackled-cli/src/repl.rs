@@ -34,7 +34,7 @@ use unshackled_tui::{
     Profile as UiProfile, TrustPrompt, UiEvent,
 };
 
-use crate::key_input::{insert_newline, is_cancel, is_newline, is_submit};
+use crate::key_input::{is_cancel, is_newline, is_submit};
 
 /// A pending approval handed from the [`TuiApprover`] (running inside the turn)
 /// to the event loop, which raises the modal and replies with the user's answer.
@@ -218,11 +218,12 @@ async fn event_loop(
                             crate::trust::remember(cwd);
                         }
                     } else if is_newline(key, &state.input) {
-                        insert_newline(&mut state.input);
+                        state.insert_input_newline();
                     } else if is_submit(key, &state.input) {
                         // Expand collapsed pastes for the model, but keep the
                         // compact form in the transcript.
                         let shown = std::mem::take(&mut state.input);
+                        state.input_cursor = 0;
                         let prompt = state.expand_pastes(&shown);
                         state.pastes.clear();
                         // Seed relevant accepted memory for this prompt (no-op
@@ -243,9 +244,9 @@ async fn event_loop(
                 Event::Paste(text) if state.trust.is_none() => {
                     if text.lines().count() >= 4 || text.len() > 400 {
                         let placeholder = state.register_paste(text);
-                        state.input.push_str(&placeholder);
+                        state.insert_input(&placeholder);
                     } else {
-                        state.input.push_str(&text);
+                        state.insert_input(&text);
                     }
                 }
                 _ => {}
@@ -363,9 +364,14 @@ fn map_key(key: KeyEvent) -> Option<Key> {
         KeyCode::Char(c) => Some(Key::Char(c)),
         KeyCode::Enter => Some(Key::Enter),
         KeyCode::Backspace => Some(Key::Backspace),
+        KeyCode::Delete => Some(Key::Delete),
         KeyCode::Esc => Some(Key::Esc),
         KeyCode::Up => Some(Key::Up),
         KeyCode::Down => Some(Key::Down),
+        KeyCode::Left => Some(Key::Left),
+        KeyCode::Right => Some(Key::Right),
+        KeyCode::Home => Some(Key::Home),
+        KeyCode::End => Some(Key::End),
         _ => None,
     }
 }
