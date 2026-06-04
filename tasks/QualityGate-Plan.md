@@ -93,7 +93,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
 | [x] | 00 | `tasks/quality-gate/00-tooling-research-and-readiness.md` | DONE | agent: 8 | n/a |
-| [ ] | 01 | `tasks/quality-gate/01-checks-config.md` | TODO | agent: 4 | n/a |
+| [x] | 01 | `tasks/quality-gate/01-checks-config.md` | DONE | agent: 4 | n/a |
 | [ ] | 02 | `tasks/quality-gate/02-profiles-and-discovery.md` | TODO | agent: 5 | n/a |
 | [ ] | 03 | `tasks/quality-gate/03-check-execution.md` | TODO | agent: 4 | n/a |
 | [ ] | 04 | `tasks/quality-gate/04-quality-gate-rule.md` | TODO | agent: 4 | n/a |
