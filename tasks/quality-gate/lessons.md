@@ -18,4 +18,9 @@
   `#[non_exhaustive]` so `PhaseComplete` adds cleanly, but the loop must define
   what a phase is (subject 04, after reading worker.rs/resume.rs).
 - 2026-06-04 · BLOCKER: baseline `clippy --all-targets` red on config tests
-  (D006), pre-existing. Every checkpoint gate is red until fixed.
+  (D006), pre-existing. Every checkpoint gate is red until fixed. RESOLVED s3.
+- 2026-06-04 · `unshackled_sandbox::classify()` dispatches per OS
+  (classify_windows vs classify_posix). Cross-platform tests must assert against a
+  `CommandClass` directly, not feed a POSIX command (`rm -rf`) and expect
+  `Destructive` — on Windows that classifies `Unknown`. Bites subject 05's
+  cross-platform act-on-findings box.
