@@ -8,9 +8,11 @@
 
 mod brief;
 mod compaction;
+mod decisions;
 mod error;
 mod planning;
 mod progress;
+mod quality;
 mod resume;
 mod rules;
 mod session;
@@ -19,16 +21,22 @@ mod worker;
 
 pub use brief::Brief;
 pub use compaction::{compact, compact_with_summary, estimate_tokens};
+pub use decisions::{today, Decision, Decisions};
 pub use error::HarnessError;
 pub use planning::{run_intake, run_plan, INTAKE_PROMPT, PLANNER_PROMPT};
 pub use progress::{Progress, Step};
+pub use quality::{
+    program_on_path, propose_gate, ratify_gate, render_check, summarize_proposal, CheckOutcome,
+    CheckRunner, CheckStatus, GateRatification, ProposedCheck, ToolchainProfile,
+    QUALITY_CHECK_TOOL,
+};
 pub use resume::{resume_one_step, ResumeOutcome, QUOTA_PAUSE_KEY};
-pub use rules::{Rule, RuleContext, RuleEngine, Trigger, Verdict};
+pub use rules::{trigger_for_cadence, Rule, RuleContext, RuleEngine, Trigger, Verdict};
 pub use session::{PlanStep, RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
 pub use system_prompt::agent_system_prompt;
 // Part of the public `RuntimeEvent::Recovery` payload, so consumers can match it.
 pub use unshackled_recovery::ModelHealth;
 pub use worker::{
-    evaluate_completion, select_next_step, AttemptResult, CompletionDecision, CompletionInputs,
-    StepDecision, StepLoop, StepTrace,
+    decide_step, evaluate_completion, select_next_step, AttemptResult, CompletionDecision,
+    CompletionInputs, StepAction, StepDecision, StepLoop, StepTrace,
 };

@@ -10,8 +10,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use unshackled_config::{CliOverrides, Config, ConfigPaths};
 use unshackled_harness::{
-    resume_one_step, run_intake, run_plan, Brief, Progress, RuleEngine, SessionConfig,
-    SessionRuntime, QUOTA_PAUSE_KEY,
+    propose_gate, ratify_gate, resume_one_step, run_intake, run_plan, summarize_proposal, Brief,
+    CheckOutcome, CheckStatus, Progress, RuleEngine, SessionConfig, SessionRuntime,
+    QUALITY_CHECK_TOOL, QUOTA_PAUSE_KEY,
 };
 use unshackled_llm::{ModelProvider, ProviderRegistry};
 use unshackled_quota::{decide_resume, PausedRun, ResumeContext, ResumeDecision, ResumePolicy};
@@ -94,6 +95,8 @@ pub struct StatusReport {
     pub test_command: Option<String>,
     pub default_provider: String,
     pub provider_credential_present: bool,
+    /// The ratified quality-gate checks, each as `name (cadence)`.
+    pub gate: Vec<String>,
 }
 
 impl StatusReport {
@@ -122,6 +125,15 @@ impl StatusReport {
             s,
             "test command: {}",
             self.test_command.as_deref().unwrap_or("(unset)")
+        );
+        let _ = writeln!(
+            s,
+            "quality gate: {}",
+            if self.gate.is_empty() {
+                "(none ratified)".to_string()
+            } else {
+                self.gate.join(", ")
+            }
         );
         let credential = if self.provider_credential_present {
             "set"
@@ -161,6 +173,13 @@ pub fn gather_status(root: &Path) -> anyhow::Result<StatusReport> {
     let default_provider = config.provider.default.clone();
     let provider_credential_present = config.resolve_credential(&default_provider).is_some();
 
+    let gate = config
+        .harness
+        .resolved_checks()
+        .iter()
+        .map(|check| format!("{} ({})", check.name, cadence_label(check.cadence)))
+        .collect();
+
     Ok(StatusReport {
         branch: git_line(root, &["rev-parse", "--abbrev-ref", "HEAD"]),
         next_step,
@@ -170,7 +189,15 @@ pub fn gather_status(root: &Path) -> anyhow::Result<StatusReport> {
         test_command: config.harness.test_command.clone(),
         default_provider,
         provider_credential_present,
+        gate,
     })
+}
+
+fn cadence_label(cadence: unshackled_config::Cadence) -> &'static str {
+    match cadence {
+        unshackled_config::Cadence::Step => "step",
+        unshackled_config::Cadence::Phase => "phase",
+    }
 }
 
 fn git_line(root: &Path, args: &[&str]) -> Option<String> {
@@ -271,6 +298,72 @@ pub fn feature(root: &Path, description: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Preview the discovered quality gate without writing anything. Read-only:
+/// discovery proposes, it never runs or ratifies a check.
+///
+/// # Errors
+/// Returns an error only if output cannot be written.
+pub fn gate_propose(root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    let proposed = propose_gate(root);
+    out.write_all(summarize_proposal(&proposed).as_bytes())?;
+    Ok(())
+}
+
+/// Ratify the discovered gate: write the proposed checks into `.unshackled.toml`
+/// as `[[harness.checks]]`, adding only checks not already ratified and leaving
+/// the rest of the config untouched. This is the trust boundary — a check does
+/// not run until it is ratified here (ADR-0009).
+///
+/// # Errors
+/// Returns an error if `.unshackled.toml` is missing or cannot be written.
+pub fn gate_ratify(root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    let config_path = root.join(".unshackled.toml");
+    if !config_path.exists() {
+        anyhow::bail!(".unshackled.toml not found; run `unshackled init` first");
+    }
+    let proposed = propose_gate(root);
+    if proposed.is_empty() {
+        write!(out, "{}", summarize_proposal(&proposed))?;
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(&config_path)?;
+    let config = unshackled_config::load(&ConfigPaths::standard(root), &CliOverrides::default())
+        .unwrap_or_else(|_| Config::default());
+    let ratified: Vec<String> = config
+        .harness
+        .checks
+        .iter()
+        .map(|check| check.name.clone())
+        .collect();
+    let result = ratify_gate(&existing, &ratified, &proposed);
+    if result.added.is_empty() {
+        writeln!(
+            out,
+            "no new checks to ratify ({} already present)",
+            result.already_present.len()
+        )?;
+        return Ok(());
+    }
+    std::fs::write(&config_path, &result.config_text)?;
+    writeln!(
+        out,
+        "ratified {} check(s) into .unshackled.toml:",
+        result.added.len()
+    )?;
+    // Echo just the newly written checks, with their risk class and warnings.
+    let added: Vec<_> = proposed
+        .into_iter()
+        .filter(|proposal| {
+            result
+                .added
+                .iter()
+                .any(|check| check.name == proposal.check.name)
+        })
+        .collect();
+    out.write_all(summarize_proposal(&added).as_bytes())?;
+    Ok(())
+}
+
 /// Run harness steps from `PROGRESS.md` until none remain, a step is blocked, or
 /// the step cap is reached. Each step runs with fresh context.
 ///
@@ -289,7 +382,17 @@ pub async fn resume(
     let workspace = Workspace::new(root)?;
     let rules = RuleEngine::with_baseline(&config.harness.rules);
     let test_command = config.harness.test_command.clone();
+    let checks = config.harness.resolved_checks();
     let max_attempts = config.harness.attempts_per_step;
+    // Ratifying the gate grants its tool identity a relaxed-profile allowance, so
+    // a non-interactive run can execute the (project-write) checks the user
+    // committed without prompting (ADR-0009). The allowance is scoped to the gate
+    // identity, which only ever runs ratified checks — never arbitrary shell.
+    let gate_allowance = if checks.is_empty() {
+        Vec::new()
+    } else {
+        vec![QUALITY_CHECK_TOOL.to_string()]
+    };
     // Connect MCP servers once; each step builds a fresh registry over them.
     let mcp = crate::mcp::McpTools::load(&config).await;
 
@@ -312,6 +415,7 @@ pub async fn resume(
             model,
             &mcp,
             config.harness.context_token_limit,
+            gate_allowance.clone(),
         );
         crate::context_inject::seed(root, &mut runtime, &step_description);
         let outcome = resume_one_step(
@@ -319,9 +423,14 @@ pub async fn resume(
             root,
             &rules,
             test_command.as_deref(),
+            &checks,
             max_attempts,
         )
         .await?;
+        let gate = render_gate(&outcome.gate);
+        if !gate.is_empty() {
+            write!(out, "{gate}")?;
+        }
         if outcome.committed {
             writeln!(out, "step {} complete", outcome.step_number)?;
         } else {
@@ -335,6 +444,26 @@ pub async fn resume(
         }
     }
     Ok(())
+}
+
+/// Render the quality-gate outcomes for a step as a bounded, one-line-per-check
+/// summary (which checks ran, pass/fail, what was auto-fixed). The per-check
+/// `detail` is already bounded and redacted; it is omitted here to keep the run
+/// log readable — `harness status` and the transcript carry the detail.
+fn render_gate(outcomes: &[CheckOutcome]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    for outcome in outcomes {
+        let status = match outcome.status {
+            CheckStatus::Passed => "passed",
+            CheckStatus::Failed => "failed",
+            CheckStatus::Denied => "denied",
+            CheckStatus::Errored => "errored",
+        };
+        let fixed = if outcome.fixed { " (auto-fixed)" } else { "" };
+        let _ = writeln!(s, "  check {}: {status}{fixed}", outcome.name);
+    }
+    s
 }
 
 /// Continue a run that paused on a provider quota/rate limit, if it is now safe.
@@ -410,6 +539,7 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+#[allow(clippy::too_many_arguments)] // a runtime genuinely composes these collaborators
 fn build_runtime(
     root: &Path,
     provider: Arc<dyn ModelProvider>,
@@ -418,11 +548,12 @@ fn build_runtime(
     model: &str,
     mcp: &crate::mcp::McpTools,
     context_token_limit: usize,
+    allowlist: Vec<String>,
 ) -> SessionRuntime {
     SessionRuntime::new(
         provider,
         mcp.registry(),
-        PermissionEngine::new(profile, Vec::new()),
+        PermissionEngine::new(profile, allowlist),
         Box::new(ScriptedApprover::new(Vec::new())),
         Store::open(root),
         workspace,
@@ -465,6 +596,7 @@ mod tests {
             test_command: Some("cargo test".to_string()),
             default_provider: "local".to_string(),
             provider_credential_present: false,
+            gate: vec!["fmt (step)".to_string(), "test (phase)".to_string()],
         };
         insta::assert_snapshot!(report.render());
     }
