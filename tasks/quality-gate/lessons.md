@@ -34,3 +34,17 @@
   `StepLoop` existed but was test-only. Subject 05 made `resume_one_step` drive it.
   The gate runs at `StepComplete` only; `PhaseComplete` has no driver yet (the
   phase-boundary surface is subject 06).
+- 2026-06-04 · No TOML serializer is available (figment reads only; no `toml`/
+  `toml_edit` dep). `gate ratify` therefore renders `[[harness.checks]]` by hand
+  and **appends** — appending array-of-tables is valid TOML and preserves the
+  user's config+comments, but you cannot append a key to an existing `[permissions]`
+  table. That ruled out a config-persisted allowlist, so the D005 allowance is
+  runtime-derived instead (D009).
+- 2026-06-04 · docs/06's `command = "…"` check example never parsed — the loader
+  requires `program`. `gate ratify` emits `program`/`args`. Subject 06 rewrote the
+  doc to the structured form (D009); when docs show config, render what the code
+  actually reads/writes.
+- 2026-06-04 · Plan-agnostic check bites tests too: a `// D005:` comment in a
+  shipped test is leakage. Cite the durable ADR (ADR-0009), not the build-plan
+  decision id. Note the DECISIONS.md model's own `D###` ids are domain content,
+  not leakage.

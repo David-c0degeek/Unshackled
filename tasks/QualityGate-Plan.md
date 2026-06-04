@@ -87,6 +87,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | D007 | 2026-06-04 | Verdict mapping landed in subject 04, not 05 | `gate_verdict` (finding→verdict) lives in `rules.rs` with the `quality_gate` rule; `CheckOutcome` carries the check's `severity`. | The rule can't compile without the mapping; 05.1 originally planned it. Subject 05 now only wires the loop + `DECISIONS.md`, consuming the rule's Retry/Block verdicts. | 04.3, 05.1, rules.rs |
 | D006 | 2026-06-04 | Baseline clippy was pre-existing red — RESOLVED | `cargo clippy --all-targets` failed on `unshackled-config/tests/config.rs` (unwrap in non-`#[test]` helper fns). User chose proper handling (no lint allow): recover the poisoned env lock and make `isolated()` return `TestResult` so callers propagate with `?`. Gate green. Commit `b6b7791`. | Honest baseline; resume-safe checkpoints require a green gate. | 00.3, config tests, b6b7791 |
 | D008 | 2026-06-04 | Replan records-and-halts; no in-loop plan regeneration | On replan-cap exhaustion `resume_one_step` appends to `DECISIONS.md` and returns the step uncommitted ("queued for replanning"); it does **not** regenerate `PROGRESS.md` in the loop. Plan regeneration stays the existing `plan --replan` command. `MAX_REPLANS` is an in-crate constant (no config field); `today()`/civil-date is in-crate (no date dep). | Keeps the highest-risk core-loop edit (auto-rewriting the plan mid-resume) out of scope while still making the deviation durable. YAGNI on a config knob and a date crate. | 05.2, 05.3, resume.rs, decisions.rs |
+| D009 | 2026-06-04 | Gate allowance is runtime-derived; docs match shipped config | (a) D005's "allowance" is granted at runtime: `resume` adds `quality_check` to the relaxed allowlist iff ratified checks exist — no `[permissions].allowlist` schema field, no textual edit of an existing `[permissions]` table. (b) docs/06's `[[harness.checks]]` example is rewritten to the structured `program`/`args` form `gate ratify` emits, superseding D002's "presentational" `command = "…"` shorthand (which never parsed). | (a) No serializer dep available (figment reads only); appending array-of-tables is clean but editing an existing table is not — runtime derivation is simpler and keeps the allowance scoped to the gate identity. (b) A copy-pasted `command = "…"` check fails the loader (`program` required); docs must match shipped. | 06.1, 06.2, 06.5, harness_cmd.rs, permission.rs, docs/06 |
 
 ---
 
@@ -100,7 +101,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | [x] | 03 | `tasks/quality-gate/03-check-execution.md` | DONE | agent: 4 | n/a |
 | [x] | 04 | `tasks/quality-gate/04-quality-gate-rule.md` | DONE | agent: 4 | n/a |
 | [x] | 05 | `tasks/quality-gate/05-act-on-findings.md` | DONE | agent: 4 (05.1=D007) | n/a |
-| [ ] | 06 | `tasks/quality-gate/06-ratification-and-surface.md` | TODO | agent: 5; product-owner: 1 | TBD |
+| [x] | 06 | `tasks/quality-gate/06-ratification-and-surface.md` | DONE | agent: 4; product-owner: 1 (deferred) | yes |
 
 ---
 
