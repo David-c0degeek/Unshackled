@@ -15,6 +15,7 @@ use unshackled_quota::{estimate_window, PausedRun};
 use crate::decisions::{today, Decisions};
 use crate::error::HarnessError;
 use crate::progress::{Progress, Step};
+use crate::quality::CheckOutcome;
 use crate::rules::{RuleEngine, Trigger};
 use crate::session::{RuntimeEvent, SessionRuntime, StopReason};
 use crate::worker::{
@@ -39,6 +40,10 @@ pub struct ResumeOutcome {
     /// Whether the run paused on a provider quota/rate limit; a `PausedRun` was
     /// persisted and `harness wait-resume` can continue it.
     pub paused: bool,
+    /// The quality-gate outcomes from the deciding attempt (which checks ran,
+    /// pass/fail, what was auto-fixed). Empty when the step ended before the gate
+    /// ran (a paused or non-completing turn).
+    pub gate: Vec<CheckOutcome>,
 }
 
 /// Cap on automated replans within a single step, so the act-on-findings loop
@@ -82,6 +87,9 @@ pub async fn resume_one_step(
     // step, runs the step-cadence gate, and turns the findings into a verdict.
     let mut step_loop = StepLoop::new(max_attempts.max(1), MAX_REPLANS);
     let mut prompt = format!("{WORKER_PROMPT}{}. {}", step.number, step.description);
+    // The deciding attempt's gate outcomes, surfaced on the returned outcome.
+    // Assigned on every loop pass before any exit that reads it.
+    let mut final_gate: Vec<CheckOutcome>;
 
     loop {
         let reason = runtime.run_turn(&prompt, &events, &cancel).await;
@@ -106,6 +114,7 @@ pub async fn resume_one_step(
                 committed: false,
                 blocked_reason: Some(format!("paused on provider limit: {}", window.reason)),
                 paused: true,
+                gate: Vec::new(),
             });
         }
         // Any other non-completing turn must not commit the step.
@@ -115,13 +124,14 @@ pub async fn resume_one_step(
                 committed: false,
                 blocked_reason: Some(format!("turn did not complete ({reason:?})")),
                 paused: false,
+                gate: Vec::new(),
             });
         }
 
         // Run configured tests (`suite_green`) and the step-cadence quality gate,
         // then reduce both to a single action.
         let tests_passed = test_command.map(|cmd| run_test_command(root, cmd));
-        let gate_outcomes = runtime
+        final_gate = runtime
             .run_gate_checks(checks, Trigger::StepComplete, root)
             .await;
         let action = decide_step(
@@ -133,7 +143,7 @@ pub async fn resume_one_step(
                 attempts: 1,
                 max_attempts,
             },
-            gate_outcomes,
+            final_gate.clone(),
         );
 
         match action {
@@ -146,6 +156,7 @@ pub async fn resume_one_step(
                     committed: false,
                     blocked_reason: Some(blocked_reason),
                     paused: false,
+                    gate: final_gate,
                 });
             }
             // An actionable finding: feed it back through the anti-sunk-cost loop.
@@ -164,6 +175,7 @@ pub async fn resume_one_step(
                             logs.len()
                         )),
                         paused: false,
+                        gate: final_gate,
                     });
                 }
                 StepDecision::GiveUp => {
@@ -174,6 +186,7 @@ pub async fn resume_one_step(
                             "gave up: the replan cap was reached for this step".to_string(),
                         ),
                         paused: false,
+                        gate: final_gate,
                     });
                 }
                 // `on_attempt` only returns `Commit` for a `Success` result, which
@@ -201,6 +214,7 @@ pub async fn resume_one_step(
         committed: true,
         blocked_reason: None,
         paused: false,
+        gate: final_gate,
     })
 }
 

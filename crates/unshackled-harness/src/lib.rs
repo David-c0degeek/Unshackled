@@ -26,8 +26,9 @@ pub use error::HarnessError;
 pub use planning::{run_intake, run_plan, INTAKE_PROMPT, PLANNER_PROMPT};
 pub use progress::{Progress, Step};
 pub use quality::{
-    program_on_path, propose_gate, CheckOutcome, CheckRunner, CheckStatus, ProposedCheck,
-    ToolchainProfile, QUALITY_CHECK_TOOL,
+    program_on_path, propose_gate, ratify_gate, render_check, summarize_proposal, CheckOutcome,
+    CheckRunner, CheckStatus, GateRatification, ProposedCheck, ToolchainProfile,
+    QUALITY_CHECK_TOOL,
 };
 pub use resume::{resume_one_step, ResumeOutcome, QUOTA_PAUSE_KEY};
 pub use rules::{trigger_for_cadence, Rule, RuleContext, RuleEngine, Trigger, Verdict};
