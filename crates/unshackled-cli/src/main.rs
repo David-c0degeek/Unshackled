@@ -281,6 +281,11 @@ enum HarnessCommand {
         /// The feature description.
         description: String,
     },
+    /// Inspect or ratify the discovered quality gate (no provider needed).
+    Gate {
+        #[command(subcommand)]
+        command: GateCommand,
+    },
     /// Work the plan: run incomplete steps, committing each. (resume)
     Resume {
         /// Model name to request.
@@ -311,6 +316,14 @@ enum HarnessCommand {
         #[arg(long)]
         bypass: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum GateCommand {
+    /// Show the discovered gate without writing anything.
+    Propose,
+    /// Write the discovered gate into `.unshackled.toml` (additions only).
+    Ratify,
 }
 
 #[tokio::main]
@@ -361,6 +374,14 @@ async fn main() -> anyhow::Result<()> {
                 HarnessCommand::Feature { description } => {
                     harness_cmd::feature(&cwd, &description)?;
                     println!("appended feature to brief.md and PROGRESS.md");
+                }
+                HarnessCommand::Gate { command } => {
+                    let mut stdout = io::stdout().lock();
+                    match command {
+                        GateCommand::Propose => harness_cmd::gate_propose(&cwd, &mut stdout)?,
+                        GateCommand::Ratify => harness_cmd::gate_ratify(&cwd, &mut stdout)?,
+                    }
+                    stdout.flush()?;
                 }
                 HarnessCommand::Resume {
                     model,
