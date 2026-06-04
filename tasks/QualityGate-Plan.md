@@ -84,7 +84,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | D003 | 2026-06-04 | Gate uses a distinct tool identity | Check execution presents a dedicated tool name (e.g. `quality_check`) to the permission engine, not `run_shell`. | The Relaxed allowlist matches by **tool name**; allowlisting `run_shell` would auto-approve all shell. A distinct identity lets ratification allow only the gate. | 03.1, 06.2, permission.rs |
 | D004 | 2026-06-04 | Gate-runner lives in `unshackled-harness` | Profiles, discovery, and the gate-runner live in `unshackled-harness`, reusing `unshackled-sandbox` `classify`/`PermissionEngine` and the run_shell spawn pattern. | Loop-adjacent; avoids a new crate; keeps classification/permission single-sourced. | 00.6, 02, 03 |
 | D005 | 2026-06-04 | Ratification = permission allowance | Ratifying the gate records the checks AND grants their tool identity an allowance (relaxed allowlist / equivalent) so cargo `ProjectWrite` checks run non-interactively. | cargo fmt/clippy/test classify `ProjectWrite` → non-interactive Default = Deny; without an allowance the gate could never run headless. | 06.1, 06.2, permission.rs |
-| D006 | 2026-06-04 | Baseline clippy is pre-existing red | `cargo clippy --all-targets` fails on `unshackled-config/tests/config.rs` (unwrap in non-`#[test]` helper fns; `allow-unwrap-in-tests` doesn't cover them). Pre-existing (commit `4679ceb`), unrelated to this plan. **Blocks checkpoint gates** until fixed. Awaiting user direction (fix baseline first vs proceed). | Honest baseline; the plan's resume-safe checkpoints require a green gate. | 00.3, config tests |
+| D006 | 2026-06-04 | Baseline clippy was pre-existing red — RESOLVED | `cargo clippy --all-targets` failed on `unshackled-config/tests/config.rs` (unwrap in non-`#[test]` helper fns). User chose proper handling (no lint allow): recover the poisoned env lock and make `isolated()` return `TestResult` so callers propagate with `?`. Gate green. Commit `b6b7791`. | Honest baseline; resume-safe checkpoints require a green gate. | 00.3, config tests, b6b7791 |
 
 ---
 
@@ -92,7 +92,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
-| [ ] | 00 | `tasks/quality-gate/00-tooling-research-and-readiness.md` | IN PROGRESS | agent: 8 | n/a |
+| [x] | 00 | `tasks/quality-gate/00-tooling-research-and-readiness.md` | DONE | agent: 8 | n/a |
 | [ ] | 01 | `tasks/quality-gate/01-checks-config.md` | TODO | agent: 4 | n/a |
 | [ ] | 02 | `tasks/quality-gate/02-profiles-and-discovery.md` | TODO | agent: 5 | n/a |
 | [ ] | 03 | `tasks/quality-gate/03-check-execution.md` | TODO | agent: 4 | n/a |
