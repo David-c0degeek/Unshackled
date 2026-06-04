@@ -84,6 +84,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | D003 | 2026-06-04 | Gate uses a distinct tool identity | Check execution presents a dedicated tool name (e.g. `quality_check`) to the permission engine, not `run_shell`. | The Relaxed allowlist matches by **tool name**; allowlisting `run_shell` would auto-approve all shell. A distinct identity lets ratification allow only the gate. | 03.1, 06.2, permission.rs |
 | D004 | 2026-06-04 | Gate-runner lives in `unshackled-harness` | Profiles, discovery, and the gate-runner live in `unshackled-harness`, reusing `unshackled-sandbox` `classify`/`PermissionEngine` and the run_shell spawn pattern. | Loop-adjacent; avoids a new crate; keeps classification/permission single-sourced. | 00.6, 02, 03 |
 | D005 | 2026-06-04 | Ratification = permission allowance | Ratifying the gate records the checks AND grants their tool identity an allowance (relaxed allowlist / equivalent) so cargo `ProjectWrite` checks run non-interactively. | cargo fmt/clippy/test classify `ProjectWrite` → non-interactive Default = Deny; without an allowance the gate could never run headless. | 06.1, 06.2, permission.rs |
+| D007 | 2026-06-04 | Verdict mapping landed in subject 04, not 05 | `gate_verdict` (finding→verdict) lives in `rules.rs` with the `quality_gate` rule; `CheckOutcome` carries the check's `severity`. | The rule can't compile without the mapping; 05.1 originally planned it. Subject 05 now only wires the loop + `DECISIONS.md`, consuming the rule's Retry/Block verdicts. | 04.3, 05.1, rules.rs |
 | D006 | 2026-06-04 | Baseline clippy was pre-existing red — RESOLVED | `cargo clippy --all-targets` failed on `unshackled-config/tests/config.rs` (unwrap in non-`#[test]` helper fns). User chose proper handling (no lint allow): recover the poisoned env lock and make `isolated()` return `TestResult` so callers propagate with `?`. Gate green. Commit `b6b7791`. | Honest baseline; resume-safe checkpoints require a green gate. | 00.3, config tests, b6b7791 |
 
 ---
@@ -96,7 +97,7 @@ beyond the two built here (later profiles are follow-on work, not this plan).
 | [x] | 01 | `tasks/quality-gate/01-checks-config.md` | DONE | agent: 4 | n/a |
 | [x] | 02 | `tasks/quality-gate/02-profiles-and-discovery.md` | DONE | agent: 5 | n/a |
 | [x] | 03 | `tasks/quality-gate/03-check-execution.md` | DONE | agent: 4 | n/a |
-| [ ] | 04 | `tasks/quality-gate/04-quality-gate-rule.md` | TODO | agent: 4 | n/a |
+| [x] | 04 | `tasks/quality-gate/04-quality-gate-rule.md` | DONE | agent: 4 | n/a |
 | [ ] | 05 | `tasks/quality-gate/05-act-on-findings.md` | TODO | agent: 5 | n/a |
 | [ ] | 06 | `tasks/quality-gate/06-ratification-and-surface.md` | TODO | agent: 5; product-owner: 1 | TBD |
 

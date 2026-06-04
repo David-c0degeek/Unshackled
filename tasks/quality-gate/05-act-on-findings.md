@@ -7,9 +7,9 @@ dependency findings block. Replans are logged to `DECISIONS.md`.
 
 ## Boxes
 
-- [ ] **05.1** (agent) Finding→verdict mapping helper (used by subject 04's rule):
-      fixed-and-passing → `Allow`; lint/test still failing → `Retry(reason)`;
-      `audit`/dependency findings → `Block(reason)`. Pure function, unit-tested.
+- [x] **05.1** (agent) Finding→verdict mapping — DONE in subject 04 (`gate_verdict`
+      in rules.rs, D007): fixed-and-passing → `Allow`; lint/test failing →
+      `Retry`; `audit`/dependency (severity block) → `Block`. Unit-tested in 04.
 - [ ] **05.2** (agent) Loop integration: on `Retry`, feed the finding back to the
       model bounded by `attempts_per_step`; on exhaustion, `replan` the step.
       Reuse the existing anti-sunk-cost path; do not add a parallel loop.
