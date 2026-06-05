@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
+use unshackled_core::{ContentBlock, Message};
 use unshackled_harness::{RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
 use unshackled_llm::{FakeProvider, ModelEvent};
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
@@ -103,6 +104,18 @@ fn drain(rx: &mut broadcast::Receiver<RuntimeEvent>) -> Vec<RuntimeEvent> {
         out.push(event);
     }
     out
+}
+
+fn message_text(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[tokio::test]
@@ -326,6 +339,207 @@ async fn context_usage_event_is_emitted_before_request() {
         event,
         RuntimeEvent::ContextUsage { used, limit } if *used > 0 && *limit == SessionConfig::default().context_token_limit
     )));
+}
+
+#[tokio::test]
+async fn clearing_conversation_resets_future_provider_context() {
+    let provider = Arc::new(
+        FakeProvider::new()
+            .text("first answer")
+            .text("second answer"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig::default(),
+        Profile::Default,
+    );
+    let session_id = h.runtime.session_id();
+
+    let reason = h
+        .runtime
+        .run_turn("first prompt", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+
+    h.runtime.clear_conversation();
+    let reason = h
+        .runtime
+        .run_turn("second prompt", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+
+    assert_eq!(h.runtime.session_id(), session_id);
+    let requests = provider.requests();
+    let second_request = requests.last().expect("second request is recorded");
+    let text = message_text(&second_request.messages);
+    assert!(text.contains("second prompt"));
+    assert!(!text.contains("first prompt"));
+    assert!(!text.contains("first answer"));
+    assert_eq!(
+        second_request
+            .messages
+            .iter()
+            .filter(|message| message.role == unshackled_core::Role::System)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn manual_compaction_reports_noop_when_context_is_under_limit() {
+    let provider = FakeProvider::new();
+    let mut h = build(provider, &[], SessionConfig::default());
+    let before = h.runtime.context_usage();
+
+    let result = h.runtime.compact_conversation();
+
+    assert!(!result.compacted);
+    assert_eq!(result.context_limit, before.1);
+    assert_eq!(result.context_used, before.0);
+}
+
+#[tokio::test]
+async fn manual_compaction_stores_a_summary_for_future_turns() {
+    let provider = Arc::new(
+        FakeProvider::new()
+            .text("one")
+            .text("two")
+            .text("three")
+            .text("after compaction"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig {
+            context_token_limit: 900,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    let filler = "context ".repeat(250);
+    for label in ["first", "second", "third"] {
+        let prompt = format!("{label} {filler}");
+        let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+        assert_eq!(reason, StopReason::Done);
+    }
+
+    let result = h.runtime.compact_conversation();
+    assert!(result.compacted);
+    assert!(result.context_used <= result.context_limit);
+
+    let reason = h
+        .runtime
+        .run_turn("after manual compact", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+
+    let requests = provider.requests();
+    let text = message_text(&requests.last().expect("request after compaction").messages);
+    assert!(text.contains("Conversation summary for trimmed history"));
+    assert!(text.contains("after manual compact"));
+}
+
+#[tokio::test]
+async fn clearing_after_manual_compaction_drops_the_compaction_summary() {
+    let provider = Arc::new(
+        FakeProvider::new()
+            .text("one")
+            .text("two")
+            .text("three")
+            .text("after clear"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig {
+            context_token_limit: 900,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    let filler = "context ".repeat(250);
+    for label in ["first", "second", "third"] {
+        let prompt = format!("{label} {filler}");
+        let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+        assert_eq!(reason, StopReason::Done);
+    }
+    assert!(h.runtime.compact_conversation().compacted);
+
+    h.runtime.clear_conversation();
+    let reason = h
+        .runtime
+        .run_turn("after clear", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+
+    let requests = provider.requests();
+    let text = message_text(&requests.last().expect("request after clear").messages);
+    assert!(text.contains("after clear"));
+    assert!(!text.contains("Conversation summary for trimmed history"));
+    assert!(!text.contains("first context"));
+}
+
+#[tokio::test]
+async fn manual_compaction_keeps_tool_call_and_result_pairs_together() {
+    let a = "a ".repeat(400);
+    let b = "b ".repeat(400);
+    let c = "c ".repeat(400);
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call("c1", "read_file", json!({ "path": "a.txt" }))
+            .text("done one")
+            .tool_call("c2", "read_file", json!({ "path": "b.txt" }))
+            .text("done two")
+            .tool_call("c3", "read_file", json!({ "path": "c.txt" }))
+            .text("done three")
+            .text("after compaction"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[("a.txt", &a), ("b.txt", &b), ("c.txt", &c)],
+        SessionConfig {
+            context_token_limit: 600,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    for prompt in ["read a", "read b", "read c"] {
+        let reason = h.runtime.run_turn(prompt, &h.events, &h.cancel).await;
+        assert_eq!(reason, StopReason::Done);
+    }
+
+    let result = h.runtime.compact_conversation();
+    assert!(result.compacted);
+
+    let reason = h
+        .runtime
+        .run_turn("after tool compaction", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+
+    let requests = provider.requests();
+    let messages = &requests.last().expect("request after compaction").messages;
+    let call_ids: Vec<_> = messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse(call) => Some(call.id.clone()),
+            _ => None,
+        })
+        .collect();
+    let result_ids: Vec<_> = messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult(result) => Some(result.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(call_ids, result_ids);
 }
 
 #[tokio::test]

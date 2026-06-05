@@ -85,6 +85,17 @@ pub struct PlanStep {
     pub status: String,
 }
 
+/// Result of manually compacting the runtime message history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManualCompaction {
+    /// Whether older messages were removed and summarized.
+    pub compacted: bool,
+    /// Estimated context usage after compaction.
+    pub context_used: usize,
+    /// Configured context limit used for the operation.
+    pub context_limit: usize,
+}
+
 /// Tuning for a session.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -199,6 +210,43 @@ impl SessionRuntime {
     /// hosts use this when a slash command changes profile mid-session.
     pub fn set_permission_profile(&mut self, profile: Profile, allowlist: Vec<String>) {
         self.engine = PermissionEngine::new(profile, allowlist);
+    }
+
+    /// Clear user/assistant/tool history while preserving the leading setup
+    /// messages required for future turns.
+    pub fn clear_conversation(&mut self) {
+        let leading_system = self
+            .messages
+            .iter()
+            .take_while(|message| message.role == Role::System)
+            .filter(|message| !is_compaction_summary(message))
+            .cloned()
+            .collect();
+        self.messages = leading_system;
+        self.last_quota = None;
+    }
+
+    /// Compact the stored runtime message history using the same rules applied
+    /// before automatic provider requests.
+    #[must_use]
+    pub fn compact_conversation(&mut self) -> ManualCompaction {
+        let result = compact_with_summary(self.messages.clone(), self.config.context_token_limit);
+        let context_used = estimate_tokens(&result.messages);
+        self.messages = result.messages;
+        ManualCompaction {
+            compacted: result.compacted,
+            context_used,
+            context_limit: self.config.context_token_limit,
+        }
+    }
+
+    /// Estimated context usage for the currently stored runtime history.
+    #[must_use]
+    pub fn context_usage(&self) -> (usize, usize) {
+        (
+            estimate_tokens(&self.messages),
+            self.config.context_token_limit,
+        )
     }
 
     /// Run the quality-gate checks whose cadence maps to `trigger`, through this
@@ -558,6 +606,15 @@ fn invalid_tool_calls(calls: &[(String, String, serde_json::Value)]) -> Option<S
         }
     }
     None
+}
+
+fn is_compaction_summary(message: &Message) -> bool {
+    message.content.iter().any(|block| match block {
+        ContentBlock::Text { text } => {
+            text.starts_with("Conversation summary for trimmed history:")
+        }
+        _ => false,
+    })
 }
 
 /// Parse the `update_plan` tool input into plan steps. Lenient: a malformed or

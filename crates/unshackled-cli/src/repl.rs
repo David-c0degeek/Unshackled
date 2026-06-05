@@ -240,10 +240,10 @@ async fn event_loop(
                         state.input_cursor = 0;
                         let prompt = state.expand_pastes(&shown);
                         state.pastes.clear();
-                        state.apply(UiEvent::UserMessage(shown));
                         if let Some(action) = parse_slash(&prompt) {
                             run_slash(terminal, state, runtime, approval_rx, &host, action).await?;
                         } else {
+                            state.apply(UiEvent::UserMessage(shown));
                             // Seed relevant accepted memory for this prompt (no-op
                             // without the learning feature or when nothing matches).
                             crate::context_inject::seed(host.cwd, runtime, &prompt);
@@ -286,6 +286,36 @@ async fn run_slash(
             runtime.set_permission_profile(sandbox_profile(profile), Vec::new());
         }
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::Clear => {
+            runtime.clear_conversation();
+            state.clear_conversation_view();
+            let (context_used, context_limit) = runtime.context_usage();
+            state.apply(UiEvent::ContextUsage {
+                context_used,
+                context_limit,
+            });
+            state.apply(UiEvent::Notice("conversation cleared".to_string()));
+        }
+        SlashAction::Compact => {
+            let summary = runtime.compact_conversation();
+            state.apply(UiEvent::ContextUsage {
+                context_used: summary.context_used,
+                context_limit: summary.context_limit,
+            });
+            let notice = if summary.compacted {
+                format!(
+                    "compacted conversation history; context {}/{}",
+                    summary.context_used, summary.context_limit
+                )
+            } else {
+                format!(
+                    "conversation already compact enough; context {}/{}",
+                    summary.context_used, summary.context_limit
+                )
+            };
+            state.apply(UiEvent::Notice(notice));
+        }
+        SlashAction::Search(query) => state.set_search(query),
         SlashAction::Resume => {
             state.mode = Mode::Harness;
             state.apply(UiEvent::Notice("running harness resume".to_string()));
@@ -297,6 +327,9 @@ async fn run_slash(
             run_harness_command(terminal, state, approval_rx, host, true).await?;
         }
         SlashAction::Quit => state.should_quit = true,
+        SlashAction::Invalid { command, reason } => {
+            state.apply(UiEvent::Notice(format!("invalid /{command}: {reason}")));
+        }
         SlashAction::Unknown(command) => {
             state.apply(UiEvent::Notice(format!(
                 "unknown slash command: /{command}"
