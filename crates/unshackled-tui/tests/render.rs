@@ -182,6 +182,19 @@ fn streaming_text_splits_on_newlines() {
 }
 
 #[test]
+fn tool_transcript_lines_use_compact_prefix() {
+    let mut state = base();
+    state.transcript.push(TranscriptLine {
+        speaker: "tool".to_string(),
+        text: "read_file ok: hello world".to_string(),
+    });
+
+    let rendered = render_string(&state, 90, 18);
+    assert!(rendered.contains("[tool] read_file ok: hello world"));
+    assert!(!rendered.contains("tool: read_file"));
+}
+
+#[test]
 fn picker_selection_moves_and_search_highlights() {
     let mut state = base();
     state.picker = Some(Picker {

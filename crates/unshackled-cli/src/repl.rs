@@ -428,6 +428,18 @@ fn map_event(event: RuntimeEvent, elapsed_secs: f64) -> Option<UiEvent> {
     match event {
         RuntimeEvent::Text(text) => Some(UiEvent::TextDelta(text)),
         RuntimeEvent::Reasoning(text) => Some(UiEvent::ReasoningDelta(text)),
+        RuntimeEvent::ToolStarted { id, name } => Some(UiEvent::ToolStarted { id, name }),
+        RuntimeEvent::ToolFinished {
+            id,
+            name,
+            is_error,
+            output,
+        } => Some(UiEvent::ToolFinished {
+            id,
+            name,
+            is_error,
+            output,
+        }),
         RuntimeEvent::Usage(usage) => Some(UiEvent::Usage {
             tokens_in: usage.input_tokens,
             tokens_out: usage.output_tokens,

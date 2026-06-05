@@ -291,6 +291,14 @@ async fn classify_error_response(status: u16, response: reqwest::Response) -> Pr
         .map(str::to_string);
     let quota = quota_from_headers(response.headers());
     let body = response.text().await.unwrap_or_default();
+    // Surface the provider's error payload (e.g. on a 500) for the run log. The
+    // body is the API's own error JSON and never echoes the credential.
+    tracing::error!(
+        status,
+        request_id = request_id.as_deref().unwrap_or("-"),
+        body = %body,
+        "openai provider returned an error response"
+    );
     let code = serde_json::from_str::<Value>(&body)
         .ok()
         .and_then(|v| v["error"]["code"].as_str().map(str::to_string));

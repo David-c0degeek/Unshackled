@@ -4,6 +4,8 @@
 //! logic. The session runtime's events are mapped into [`UiEvent`]s by the
 //! caller, keeping this crate decoupled from the provider/harness stack.
 
+use std::collections::HashMap;
+
 /// Operating mode shown in the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -143,6 +145,8 @@ pub struct AppState {
     pub search: Option<String>,
     /// The model's current task checklist (empty until it calls `update_plan`).
     pub plan: Vec<PlanItem>,
+    #[doc(hidden)]
+    pub active_tools: HashMap<String, usize>,
     pub should_quit: bool,
     /// Whether a turn is in flight (drives the working indicator).
     pub busy: bool,
@@ -174,6 +178,7 @@ impl AppState {
             pastes: Vec::new(),
             search: None,
             plan: Vec::new(),
+            active_tools: HashMap::new(),
             should_quit: false,
             busy: false,
             spinner: 0,
@@ -367,8 +372,25 @@ impl AppState {
     /// Apply a mapped runtime/UI event to the state.
     pub fn apply(&mut self, event: UiEvent) {
         match event {
-            UiEvent::TextDelta(delta) => self.streaming.push_str(&delta),
-            UiEvent::ReasoningDelta(delta) => self.thinking.text.push_str(&delta),
+            UiEvent::TextDelta(delta) => {
+                let delta = if self.streaming.is_empty() {
+                    delta
+                        .trim_start_matches(|ch| matches!(ch, '\r' | '\n'))
+                        .to_string()
+                } else {
+                    delta
+                };
+                if !delta.is_empty() {
+                    self.streaming.push_str(&delta);
+                }
+            }
+            UiEvent::ReasoningDelta(delta) => {
+                // Skip whitespace-only reasoning deltas so the thinking panel
+                // does not fill with blank lines.
+                if !delta.trim().is_empty() {
+                    self.thinking.text.push_str(&delta);
+                }
+            }
             UiEvent::TurnComplete => {
                 if !self.streaming.is_empty() {
                     let text = std::mem::take(&mut self.streaming);
@@ -413,6 +435,43 @@ impl AppState {
                 });
             }
             UiEvent::PlanUpdated(plan) => self.plan = plan,
+            UiEvent::ToolStarted { id, name } => {
+                self.transcript.push(TranscriptLine {
+                    speaker: "tool".to_string(),
+                    text: format!("{name} running"),
+                });
+                self.active_tools.insert(id, self.transcript.len() - 1);
+            }
+            UiEvent::ToolFinished {
+                id,
+                name,
+                is_error,
+                output,
+            } => {
+                let status = if is_error { "error" } else { "ok" };
+                let mut text = format!("{name} {status}");
+                let summary = compact_tool_output(&output);
+                if !summary.is_empty() {
+                    text.push_str(": ");
+                    text.push_str(&summary);
+                }
+                let updated = if let Some(index) = self.active_tools.remove(&id) {
+                    if let Some(line) = self.transcript.get_mut(index) {
+                        line.text = text.clone();
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !updated {
+                    self.transcript.push(TranscriptLine {
+                        speaker: "tool".to_string(),
+                        text,
+                    });
+                }
+            }
             UiEvent::ApprovalRequested(request) => self.approval = Some(request),
             UiEvent::ApprovalResolved => self.approval = None,
             UiEvent::ToggleThinking => self.thinking.visible = !self.thinking.visible,
@@ -453,10 +512,36 @@ pub enum UiEvent {
     RecoveryNotice(String),
     /// The model's task checklist changed.
     PlanUpdated(Vec<PlanItem>),
+    ToolStarted {
+        id: String,
+        name: String,
+    },
+    ToolFinished {
+        id: String,
+        name: String,
+        is_error: bool,
+        output: String,
+    },
     ApprovalRequested(ApprovalRequest),
     ApprovalResolved,
     ToggleThinking,
     Quit,
+}
+
+fn compact_tool_output(output: &str) -> String {
+    const MAX_CHARS: usize = 96;
+
+    let body = output
+        .split_once("\noutput:\n")
+        .map_or(output, |(_, body)| body);
+    let mut summary = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if summary.chars().count() <= MAX_CHARS {
+        return summary;
+    }
+
+    summary = summary.chars().take(MAX_CHARS - 3).collect();
+    summary.push_str("...");
+    summary
 }
 
 #[cfg(test)]
@@ -502,6 +587,39 @@ mod tests {
         // The bad partial output is dropped so the retry starts on a fresh line.
         assert!(state.streaming.is_empty());
         assert!(matches!(state.transcript.last(), Some(line) if line.speaker == "system"));
+    }
+
+    #[test]
+    fn leading_blank_streaming_lines_are_dropped() {
+        let mut state = state();
+        state.apply(UiEvent::TextDelta("\n\nThe answer".to_string()));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "The answer");
+    }
+
+    #[test]
+    fn tool_status_is_kept_to_one_compact_line() {
+        let mut state = state();
+        state.apply(UiEvent::ToolStarted {
+            id: "call_1".to_string(),
+            name: "read_file".to_string(),
+        });
+        state.apply(UiEvent::ToolFinished {
+            id: "call_1".to_string(),
+            name: "read_file".to_string(),
+            is_error: false,
+            output: "tool: read_file\nstatus: ok\noutput:\nfirst line\n\nsecond line with detail"
+                .to_string(),
+        });
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].speaker, "tool");
+        assert_eq!(
+            state.transcript[0].text,
+            "read_file ok: first line second line with detail"
+        );
     }
 
     #[test]

@@ -121,6 +121,28 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
     }
 }
 
+/// Merge runs of consecutive `Role::System` messages into a single system
+/// message, preserving order and content. Compaction injects its summary as a
+/// system message right after the agent prompt, which would otherwise reach the
+/// provider as two consecutive system messages — fine for the Anthropic adapter
+/// (it concatenates all system blocks) but surfaced verbatim by the OpenAI-style
+/// adapter. Folding them keeps a single leading system block on every wire.
+/// Only *adjacent* system messages merge, so a lone system message elsewhere in
+/// the history is left untouched.
+#[must_use]
+pub fn merge_consecutive_system(messages: Vec<Message>) -> Vec<Message> {
+    let mut out: Vec<Message> = Vec::with_capacity(messages.len());
+    for message in messages {
+        match out.last_mut() {
+            Some(last) if last.role == Role::System && message.role == Role::System => {
+                last.content.extend(message.content);
+            }
+            _ => out.push(message),
+        }
+    }
+    out
+}
+
 fn build_messages(
     system: &[Message],
     summary: Option<&Message>,
@@ -225,6 +247,31 @@ mod tests {
                 ))],
             ),
         ]
+    }
+
+    #[test]
+    fn merge_consecutive_system_folds_only_adjacent_system_messages() {
+        let messages = vec![
+            Message::text(Role::System, "agent prompt"),
+            Message::text(Role::System, "summary"),
+            Message::text(Role::User, "hi"),
+            Message::text(Role::System, "late note"),
+        ];
+        let merged = merge_consecutive_system(messages);
+
+        assert_eq!(
+            merged.iter().map(|m| m.role).collect::<Vec<_>>(),
+            vec![Role::System, Role::User, Role::System]
+        );
+        let leading: Vec<&str> = merged[0]
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(leading, vec!["agent prompt", "summary"]);
     }
 
     #[test]

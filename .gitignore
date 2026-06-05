@@ -9,6 +9,7 @@
 .env.*
 !.env.example
 
+.unshackled/
 
 # Local launch-generated provider config (LocalBox writes this in cwd)
 /.unshackled.toml

@@ -36,7 +36,12 @@ assert_cmd = "=2.0.16"
 async-trait = "=0.1.83"
 clap = { version = "=4.5.23", features = ["derive", "env"] }
 crossterm = "=0.28.1"
-ratatui = { version = "=0.29.0", default-features = false }
+# `unstable-rendered-line-info` exposes `Paragraph::line_count`, used by the
+# transcript renderer to match ratatui's own word-wrapping when computing the
+# scroll bounds (a plain cargo feature; no nightly required).
+ratatui = { version = "=0.29.0", default-features = false, features = [
+    "unstable-rendered-line-info",
+] }
 tui-textarea = "=0.7.0"
 figment = { version = "=0.10.19", features = ["env", "toml", "yaml"] }
 futures = "=0.3.31"

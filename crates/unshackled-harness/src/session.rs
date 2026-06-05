@@ -55,7 +55,12 @@ pub enum RuntimeEvent {
     /// A tool call started.
     ToolStarted { id: String, name: String },
     /// A tool call finished.
-    ToolFinished { id: String, is_error: bool },
+    ToolFinished {
+        id: String,
+        name: String,
+        is_error: bool,
+        output: String,
+    },
     /// Token usage.
     Usage(TokenUsage),
     /// Estimated context usage for the request about to be sent.
@@ -317,8 +322,11 @@ impl SessionRuntime {
             } else {
                 Vec::new()
             };
+            // Fold the compaction summary into the single leading system block
+            // so providers never receive two consecutive system messages.
+            let request_messages = crate::compaction::merge_consecutive_system(compacted.messages);
             let request =
-                ModelRequest::new(self.config.model.clone(), compacted.messages).with_tools(tools);
+                ModelRequest::new(self.config.model.clone(), request_messages).with_tools(tools);
 
             let mut stream = match self.open_stream(&request, events, cancel).await {
                 Ok(stream) => stream,
@@ -425,14 +433,17 @@ impl SessionRuntime {
 
             // Assemble and persist the assistant message.
             let mut content = Vec::new();
-            if !reasoning.is_empty() {
+            let reasoning = trim_leading_blank_lines(reasoning);
+            let text = trim_leading_blank_lines(text);
+
+            if !reasoning.trim().is_empty() {
                 content.push(ContentBlock::Reasoning {
                     text: reasoning,
                     signature: None,
                     provider_metadata: None,
                 });
             }
-            if !text.is_empty() {
+            if !text.trim().is_empty() {
                 content.push(ContentBlock::text(text));
             }
             for (id, name, input) in &calls {
@@ -472,7 +483,7 @@ impl SessionRuntime {
                     id: id.clone(),
                     name: name.clone(),
                 });
-                let call = ToolCall::new(ToolUseId::from(id.as_str()), name, input);
+                let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input);
                 let ctx = ToolContext {
                     workspace: &self.workspace,
                     interactivity: self.config.interactivity,
@@ -484,7 +495,9 @@ impl SessionRuntime {
                     .await;
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
+                    name,
                     is_error: result.is_error,
+                    output: result.output.clone(),
                 });
                 self.append(Message::new(
                     Role::Tool,
@@ -509,6 +522,14 @@ impl SessionRuntime {
             let _ = self.store.put_tool_output(&key, &redact(&json));
         }
     }
+}
+
+fn trim_leading_blank_lines(mut text: String) -> String {
+    let trimmed = text.trim_start_matches(|ch| matches!(ch, '\r' | '\n'));
+    if trimmed.len() != text.len() {
+        text.drain(..text.len() - trimmed.len());
+    }
+    text
 }
 
 fn invalid_tool_calls(calls: &[(String, String, serde_json::Value)]) -> Option<String> {

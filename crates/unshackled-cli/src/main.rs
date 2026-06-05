@@ -16,6 +16,7 @@ mod harness_cmd;
 mod key_input;
 #[cfg(feature = "learning")]
 mod learning_cmd;
+mod logging;
 mod mcp;
 mod memory_cmd;
 #[cfg(feature = "tui")]
@@ -328,7 +329,12 @@ enum GateCommand {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Some(log_path) = logging::init(&cwd) {
+        // The path goes to stderr (not the TUI's stdout) so the user knows where
+        // to tail the run's log.
+        eprintln!("unshackled: logging to {}", log_path.display());
+    }
     let cli = Cli::parse();
 
     let command = match cli.command {
