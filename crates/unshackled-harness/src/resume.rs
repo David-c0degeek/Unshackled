@@ -8,7 +8,7 @@ use std::process::Command;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use unshackled_config::CheckConfig;
+use unshackled_config::{AutoFix, Cadence, CheckConfig};
 use unshackled_llm::QuotaInfo;
 use unshackled_quota::{estimate_window, PausedRun};
 
@@ -16,7 +16,7 @@ use crate::decisions::{today, Decisions};
 use crate::error::HarnessError;
 use crate::progress::{Progress, Step};
 use crate::quality::CheckOutcome;
-use crate::rules::{RuleEngine, Trigger};
+use crate::rules::{RuleContext, RuleEngine, Trigger, Verdict};
 use crate::session::{RuntimeEvent, SessionRuntime, StopReason};
 use crate::worker::{
     decide_step, AttemptResult, CompletionInputs, StepAction, StepDecision, StepLoop,
@@ -113,6 +113,22 @@ pub async fn resume_one_step_with_events(
         })?
         .clone();
 
+    let session_start_ctx = RuleContext {
+        uncommitted_unrelated: has_unrelated_uncommitted_changes(root)?,
+        ..RuleContext::default()
+    };
+    if let Some(reason) =
+        first_blocking_reason(rule_engine, Trigger::SessionStart, &session_start_ctx)
+    {
+        return Ok(ResumeOutcome {
+            step_number: step.number,
+            committed: false,
+            blocked_reason: Some(reason),
+            paused: false,
+            gate: Vec::new(),
+        });
+    }
+
     let commit_message = format!("harness: {}", step.description);
 
     // The anti-sunk-cost loop owns the attempt/replan budget; each pass works the
@@ -162,10 +178,18 @@ pub async fn resume_one_step_with_events(
 
         // Run configured tests (`suite_green`) and the step-cadence quality gate,
         // then reduce both to a single action.
-        let tests_passed = test_command.map(|cmd| run_test_command(root, cmd));
+        let mut step_checks = Vec::new();
+        if let Some(check) = test_command.and_then(legacy_test_check) {
+            step_checks.push(check);
+        }
+        step_checks.extend(checks.iter().cloned());
         final_gate = runtime
-            .run_gate_checks(checks, Trigger::StepComplete, root)
+            .run_gate_checks(&step_checks, Trigger::StepComplete, root)
             .await;
+        let tests_passed = final_gate
+            .iter()
+            .find(|outcome| outcome.name == "test")
+            .map(CheckOutcome::passed);
         let action = decide_step(
             rule_engine,
             &CompletionInputs {
@@ -229,14 +253,24 @@ pub async fn resume_one_step_with_events(
     }
 
     // Commit the step.
-    git(root, &["add", "-A"])?;
-    git(root, &["commit", "-m", &commit_message])?;
-    let hash = git(root, &["rev-parse", "--short", "HEAD"])?
-        .trim()
-        .to_string();
+    let changed_paths = committable_status_paths(root)?
+        .into_iter()
+        .filter(|path| path != "PROGRESS.md")
+        .collect::<Vec<_>>();
+    let hash = if changed_paths.is_empty() {
+        None
+    } else {
+        git_add_paths(root, &changed_paths)?;
+        git(root, &["commit", "-m", &commit_message])?;
+        Some(
+            git(root, &["rev-parse", "--short", "HEAD"])?
+                .trim()
+                .to_string(),
+        )
+    };
 
     // Update and commit progress.
-    progress.mark_complete(step.number, Some(hash), step_loop.replans() + 1);
+    progress.mark_complete(step.number, hash, step_loop.replans() + 1);
     write(&progress_path, &progress.render())?;
     git(root, &["add", "PROGRESS.md"])?;
     git(root, &["commit", "-m", "harness: update progress"])?;
@@ -289,17 +323,19 @@ fn record_replan(
     write(&path, &decisions.render())
 }
 
-fn run_test_command(root: &Path, command: &str) -> bool {
+fn legacy_test_check(command: &str) -> Option<CheckConfig> {
     let mut parts = command.split_whitespace();
-    let Some(program) = parts.next() else {
-        return false;
-    };
-    Command::new(program)
-        .args(parts)
-        .current_dir(root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let program = parts.next()?.to_string();
+    Some(CheckConfig {
+        name: "test".to_string(),
+        program,
+        args: parts.map(str::to_string).collect(),
+        fix_program: None,
+        fix_args: Vec::new(),
+        cadence: Cadence::Step,
+        auto_fix: AutoFix::No,
+        severity: None,
+    })
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, HarnessError> {
@@ -316,6 +352,58 @@ fn git(root: &Path, args: &[&str]) -> Result<String, HarnessError> {
             String::from_utf8_lossy(&output.stderr)
         )))
     }
+}
+
+fn git_add_paths(root: &Path, paths: &[String]) -> Result<(), HarnessError> {
+    let mut args = vec!["add", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    git(root, &args).map(|_| ())
+}
+
+fn has_unrelated_uncommitted_changes(root: &Path) -> Result<bool, HarnessError> {
+    Ok(!committable_status_paths(root)?.is_empty())
+}
+
+fn committable_status_paths(root: &Path) -> Result<Vec<String>, HarnessError> {
+    let status = git(root, &["status", "--porcelain", "--untracked-files=all"])?;
+    Ok(parse_status_paths(&status)
+        .into_iter()
+        .filter(|path| !is_runtime_state_path(path))
+        .collect())
+}
+
+fn parse_status_paths(status: &str) -> Vec<String> {
+    status
+        .lines()
+        .filter_map(|line| {
+            let path = line.get(3..)?.trim();
+            let path = path.rsplit_once(" -> ").map_or(path, |(_, new)| new);
+            if path.is_empty() {
+                None
+            } else {
+                Some(path.trim_matches('"').replace('\\', "/"))
+            }
+        })
+        .collect()
+}
+
+fn is_runtime_state_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized == ".unshackled" || normalized.starts_with(".unshackled/")
+}
+
+fn first_blocking_reason(
+    rule_engine: &RuleEngine,
+    trigger: Trigger,
+    ctx: &RuleContext,
+) -> Option<String> {
+    rule_engine
+        .evaluate(trigger, ctx)
+        .into_iter()
+        .find_map(|(name, verdict)| match verdict {
+            Verdict::Block(reason) => Some(format!("{name}: {reason}")),
+            _ => None,
+        })
 }
 
 fn read(path: &Path) -> Result<String, HarnessError> {

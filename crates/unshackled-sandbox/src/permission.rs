@@ -77,7 +77,7 @@ impl Effect {
 /// A request to evaluate one effect.
 #[derive(Debug, Clone)]
 pub struct PermissionRequest {
-    pub tool: &'static str,
+    pub tool: String,
     pub effect: Effect,
     pub interactivity: Interactivity,
     pub trusted: bool,
@@ -121,7 +121,7 @@ impl PermissionEngine {
                 }
             }
             Profile::Relaxed => {
-                let base = if self.allowlist.iter().any(|t| t == request.tool) {
+                let base = if self.allowlist.iter().any(|t| t == &request.tool) {
                     Decision::Allow
                 } else {
                     base_decision(request)
@@ -216,6 +216,7 @@ pub trait Approver {
 #[derive(Debug, Default)]
 pub struct ScriptedApprover {
     responses: std::sync::Mutex<std::collections::VecDeque<bool>>,
+    exhausted_response: bool,
 }
 
 impl ScriptedApprover {
@@ -224,13 +225,17 @@ impl ScriptedApprover {
     pub fn new(responses: Vec<bool>) -> Self {
         Self {
             responses: std::sync::Mutex::new(responses.into_iter().collect()),
+            exhausted_response: false,
         }
     }
 
     /// An approver that always approves.
     #[must_use]
     pub fn always() -> Self {
-        Self::new(Vec::new())
+        Self {
+            responses: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            exhausted_response: true,
+        }
     }
 }
 
@@ -244,7 +249,7 @@ impl Approver for ScriptedApprover {
             .lock()
             .ok()
             .and_then(|mut r| r.pop_front())
-            .unwrap_or(false);
+            .unwrap_or(self.exhausted_response);
         Box::pin(async move { decision })
     }
 }
@@ -255,7 +260,7 @@ mod tests {
 
     fn req(effect: Effect, interactivity: Interactivity, trusted: bool) -> PermissionRequest {
         PermissionRequest {
-            tool: "test",
+            tool: "test".to_string(),
             effect,
             interactivity,
             trusted,
@@ -350,10 +355,10 @@ mod tests {
             Interactivity::Interactive,
             true,
         );
-        request.tool = "run_shell";
+        request.tool = "run_shell".to_string();
         assert_eq!(e.decide(&request), Decision::Allow);
         // A non-listed tool still follows the table.
-        request.tool = "write_file";
+        request.tool = "write_file".to_string();
         assert_eq!(e.decide(&request), Decision::Ask);
     }
 
@@ -382,5 +387,31 @@ mod tests {
             ));
             assert_eq!(decision, Decision::Deny, "profile {profile:?}");
         }
+    }
+
+    #[test]
+    fn scripted_approver_always_approves_after_exhaustion() {
+        let approver = ScriptedApprover::always();
+        let request = req(
+            Effect::RunCommand(CommandClass::ProjectWrite),
+            Interactivity::Interactive,
+            true,
+        );
+
+        assert!(futures::executor::block_on(approver.approve(&request)));
+        assert!(futures::executor::block_on(approver.approve(&request)));
+    }
+
+    #[test]
+    fn scripted_approver_new_denies_after_script_is_exhausted() {
+        let approver = ScriptedApprover::new(vec![true]);
+        let request = req(
+            Effect::RunCommand(CommandClass::ProjectWrite),
+            Interactivity::Interactive,
+            true,
+        );
+
+        assert!(futures::executor::block_on(approver.approve(&request)));
+        assert!(!futures::executor::block_on(approver.approve(&request)));
     }
 }

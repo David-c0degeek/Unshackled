@@ -1,171 +1,154 @@
 # Implementation Checklist
 
-## Foundation
+Status as of 2026-06-05. Checked items mean the implementation exists and has
+local automated coverage unless the note says it still needs live validation.
 
-- [x] Replace repository URL placeholders. (https://github.com/David-c0degeek/Unshackled-Rust)
-- [ ] Add GitHub Actions.
-- [ ] Add `cargo-deny` CI step.
-- [ ] Add `cargo-audit` CI step.
-- [ ] Add changelog.
-- [ ] Add contributor guide.
+## Implemented And Covered
 
-## Core
+### Foundation
 
-- [ ] Add typed IDs for sessions, turns, and tool calls.
-- [ ] Add message metadata.
-- [ ] Add thinking/reasoning content/event model.
-- [ ] Persist and replay reasoning signatures/provider metadata when required.
-- [ ] Add usage accounting model.
-- [ ] Add structured error hierarchy.
+- [x] Repository URLs are real.
+- [x] GitHub Actions run the Rust gate on Windows, Linux, and macOS.
+- [x] CI includes blocking supply-chain hygiene: `cargo deny check`,
+      `cargo audit`, and `cargo machete`.
+- [x] `deny.toml` defines license, source, advisory, duplicate, and wildcard
+      dependency policy.
 
-## Config
+### Core Runtime
 
-- [ ] Implement config loading.
-- [ ] Implement user config path resolution.
-- [ ] Implement project config path resolution.
-- [ ] Implement env overrides.
-- [ ] Implement config diagnostics.
+- [x] Typed session and tool-call IDs.
+- [x] Message content model with text, reasoning, tool-use, and tool-result
+      blocks.
+- [x] Usage accounting model.
+- [x] Provider-neutral stream event model, including reasoning deltas and usage.
+- [x] Typed error hierarchies at crate boundaries.
+- [x] Transcript persistence with redaction before write.
+- [x] Context compaction that preserves tool-call/tool-result pairing.
 
-## Providers
+### Configuration
 
-- [ ] Implement provider trait fully.
-- [ ] Implement local OpenAI-compatible provider.
-- [ ] Implement official hosted provider.
-- [ ] Implement provider registry.
-- [ ] Implement mock provider for tests.
-- [ ] Add stream parser tests.
-- [ ] Add quota/rate-limit classification.
-- [ ] Add reset-window metadata model.
-- [ ] Add provider capability declarations.
-- [ ] Add reasoning/thinking event translation.
-- [ ] Add reasoning round-trip tests for tool-use loops.
+- [x] Config loading from defaults, user config, project config, environment,
+      and CLI overrides.
+- [x] User and project config path resolution.
+- [x] Config diagnostics through `doctor`.
+- [x] Permission profile config for `default`, `relaxed`, and `bypass`.
+- [x] Quota wait/resume policy config.
 
-## Tools
+### Providers
 
-- [ ] Implement tool registry.
-- [ ] Implement path policy.
-- [ ] Implement read tool.
-- [ ] Implement write tool.
-- [ ] Implement edit tool.
-- [ ] Implement search tool.
-- [ ] Implement shell tool.
-- [ ] Implement git tools.
-- [ ] Add approval interface.
+- [x] Provider trait and registry.
+- [x] Local/OpenAI-compatible provider.
+- [x] Official hosted provider adapters currently in tree.
+- [x] Fake provider for deterministic tests.
+- [x] Stream parser tests for text, tool calls, malformed streams, and quota
+      metadata.
+- [x] Quota and rate-limit classification with reset-window metadata.
+- [x] Provider capability declarations.
+- [x] Reasoning/thinking event translation and request continuity tests.
 
-## Modes and Permissions
+### Tools And Permissions
 
-- [ ] Implement agent mode loop (no rule engine).
-- [ ] Implement harness mode entry paths (ground-up, single task, adopt existing).
-- [ ] Implement mode switching at safe boundaries.
-- [ ] Implement permission profiles (default, relaxed, bypass).
-- [ ] Implement bypass launch flag with active-profile indicator.
+- [x] Tool registry with schema generation from typed inputs.
+- [x] Workspace path policy.
+- [x] File read, write, edit, multi-edit, list, find, and search tools.
+- [x] Shell command tool with argument-list execution and timeout.
+- [x] Git status, diff, log, add, restore, and commit tools.
+- [x] Approval interface with scripted approval test support.
+- [x] Command classification for POSIX, PowerShell, `cmd.exe`, and direct
+      executables.
+- [x] Non-interactive denial policy for risky commands.
+- [x] Destructive-command and approval-path regression tests.
 
-## Harness
+### Harness
 
-- [ ] Implement brief parser.
-- [ ] Implement brief renderer.
-- [ ] Implement progress parser.
-- [ ] Implement progress renderer.
-- [ ] Implement status command.
-- [ ] Implement intake.
-- [ ] Implement planner.
-- [ ] Implement rules.
-- [ ] Implement resume loop.
-- [ ] Implement attempt logs.
-- [ ] Implement replan loop.
-- [ ] Implement context compaction strategy.
-- [ ] Implement worker-loop trace events.
-- [ ] Implement wait/resume after provider quota reset.
-- [ ] Add unattended-resume safety gates.
+- [x] Brief parser and renderer.
+- [x] Progress parser and renderer.
+- [x] Status command.
+- [x] Intake and planner flows with fake-provider tests.
+- [x] Rule engine with trigger/verdict coverage.
+- [x] Resume loop with bounded retry and replan behavior.
+- [x] Quality gate discovery, ratification, execution, and auto-fix handling.
+- [x] Legacy `harness.test_command` runs through the mediated quality-check
+      path.
+- [x] Resume session-start preflight blocks unrelated dirty work before provider
+      work.
+- [x] Harness step commits stage only intended project paths, excluding local
+      `.unshackled/` runtime state.
+- [x] Worker-loop trace events.
+- [x] Quota wait/resume records and safety gates.
+- [x] Mid-stream quota/rate-limit errors pause cleanly instead of entering
+      bad-output recovery.
 
-## TUI
+### TUI
 
-- [ ] Pick TUI crate stack.
-- [ ] Implement message list.
-- [ ] Implement input box.
-- [ ] Implement streaming render.
-- [ ] Implement approval modal.
-- [ ] Implement status line.
-- [ ] Implement always-visible footer stats.
-- [ ] Implement optional thinking/reasoning side panel.
-- [ ] Implement narrow-terminal panel collapse.
-- [ ] Implement slash commands.
+- [x] Ratatui/crossterm stack selected by ADR.
+- [x] Message list, input box, streaming render, approval modal, status line,
+      footer stats, and optional thinking panel.
+- [x] Narrow-terminal layout behavior and render snapshots.
+- [x] Slash command surface used by the interactive runtime.
 
-## Recovery
+### Recovery
 
-- [ ] Detect empty responses.
-- [ ] Detect repeated-token loops.
-- [ ] Detect slash floods.
-- [ ] Skip false positives inside fenced code/log/base64 contexts.
-- [ ] Detect malformed tool calls.
-- [ ] Implement recovery retry ladder.
-- [ ] Add hard budget for repair prompts.
-- [ ] Persist recovery diagnostics.
+- [x] Empty/incomplete stream handling.
+- [x] Repeated-token loop and slash-flood detection.
+- [x] False-positive guards for fenced/code-like content.
+- [x] Malformed tool-call handling.
+- [x] Recovery retry ladder and hard repair budget.
+- [x] Recovery diagnostics persistence.
 
-## Skills
+### Skills, Memory, MCP, Store, And Evals
 
-- [ ] Define skill manifest.
-- [ ] Define trigger semantics.
-- [ ] Implement project skill loading.
-- [ ] Implement user skill loading.
-- [ ] Implement skill validation.
-- [ ] Implement skill permission declarations.
-- [ ] Implement generated skill drafts.
-- [ ] Add skill suggestion cooldowns.
+- [x] Skill manifest, loading, validation, suggestions, and generated drafts.
+- [x] Local memory integration with inspect/delete/opt-out/redaction surfaces.
+- [x] MCP client, tool discovery, and permission/redaction-gated MCP tool calls.
+- [x] MCP registry rebuilds use owned dynamic descriptors rather than leaked
+      static strings.
+- [x] Store transcript format, atomic writes, session index, export, cache,
+      provider metadata, tool-output snapshots, and quota pause records.
+- [x] Fake-provider eval runner and golden-task smoke coverage.
 
-## Memory
+## Implemented But Needs Hardening
 
-- [ ] Define flat local memory store format.
-- [ ] Implement project memory.
-- [ ] Add graph layer only after flat store is useful.
-- [ ] Implement explicit global-memory consent.
-- [ ] Implement memory inspect command.
-- [ ] Implement memory delete command.
-- [ ] Implement memory opt-out.
-- [ ] Add memory redaction.
-- [ ] Add memory relevance threshold and token cap.
+- [ ] Workspace trust prompts need more end-to-end UI coverage across CLI and
+      TUI surfaces.
+- [ ] Memory relevance thresholds and token-budget behavior need broader
+      real-project calibration.
+- [ ] MCP resource reads and server health display need live server validation.
+- [ ] Provider adapters need periodic review against current official API docs
+      before public release.
+- [ ] `cargo audit` currently allows informational warnings for transitive
+      `paste`, `rustls-pemfile`, and `lru`; revisit when upstream dependency
+      updates are compatible.
+- [ ] `time 0.3.37` is temporarily ignored for `RUSTSEC-2026-0009` because the
+      fixed `time 0.3.47` crate requires edition 2024 metadata that Cargo 1.82
+      cannot parse. Remove the ignore when the workspace MSRV is raised enough
+      to adopt `time >=0.3.47`.
 
-## MCP
+## Not Implemented
 
-- [ ] Implement MCP client.
-- [ ] Discover MCP tools.
-- [ ] Route MCP tool calls through permission checks.
-- [ ] Read MCP resources.
-- [ ] Persist server configs and show server health.
+- [ ] Changelog.
+- [ ] Contributor guide.
+- [ ] Install docs.
+- [ ] Alpha release checklist.
+- [ ] Public release tag `v0.1.0-alpha.1`.
 
-## Evals
+## Release Gate
 
-- [ ] Define golden-task fixture format.
-- [ ] Add fake-provider eval runner.
-- [ ] Track task success rate.
-- [ ] Track turn/tool/token counts.
-- [ ] Add optional live-provider eval mode.
+Before an alpha tag, run and record:
 
-## Store
+```powershell
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo check --workspace
+cargo clippy -p unshackled --features tui,learning --all-targets -- -D warnings
+cargo build -p unshackled --features tui,learning
+cargo deny check
+cargo audit
+cargo machete
+cargo run -p unshackled -- doctor
+```
 
-- [ ] Implement transcript format.
-- [ ] Implement atomic writes.
-- [ ] Implement session index.
-- [ ] Implement redaction.
-- [ ] Implement export command.
-- [ ] Persist memory store.
-- [ ] Persist skill drafts.
-- [ ] Persist quota wait/resume records.
-
-## Security
-
-- [ ] Implement secret detection.
-- [ ] Implement command classification.
-- [ ] Implement Windows PowerShell/cmd command classification.
-- [ ] Implement POSIX shell command classification.
-- [ ] Add Windows path escape tests.
-- [ ] Implement workspace trust prompts.
-- [ ] Implement non-interactive denial policy.
-- [ ] Add destructive command tests.
-
-## Release
-
-- [ ] Add install docs.
-- [ ] Add alpha release checklist.
-- [ ] Run clean-room audit.
-- [ ] Tag `v0.1.0-alpha.1`.
+Also complete the clean-room audit from `docs/00-clean-room.md`, review all
+remaining advisory warnings, and confirm no transcripts, API keys, tokens, or
+private data are tracked.

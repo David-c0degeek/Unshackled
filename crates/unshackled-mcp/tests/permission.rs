@@ -106,3 +106,56 @@ async fn mcp_tool_output_is_redacted() {
     );
     assert!(result.output.contains("[REDACTED]"));
 }
+
+#[tokio::test]
+async fn repeated_mcp_registry_rebuilds_preserve_dynamic_metadata_and_routing() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::new(dir.path()).unwrap();
+    let descriptor = McpToolDescriptor {
+        name: "dynamic_echo".to_string(),
+        description: "echo through mcp".to_string(),
+        input_schema: json!({ "type": "object", "properties": { "text": { "type": "string" } } }),
+    };
+
+    for expected in ["first", "second"] {
+        let transport = Arc::new(ScriptedTransport::new().with(
+            "tools/call",
+            json!({ "content": [{ "type": "text", "text": expected }] }),
+        ));
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(McpTool::new(
+            &descriptor,
+            vec![Effect::ReadPath {
+                inside_workspace: true,
+                secret_like: false,
+            }],
+            transport,
+        )));
+
+        let specs = registry.specs();
+        assert_eq!(specs[0].0, "dynamic_echo");
+        assert_eq!(specs[0].1, "echo through mcp");
+
+        let call = ToolCall::new(
+            ToolUseId::from(format!("c_{expected}").as_str()),
+            "dynamic_echo",
+            json!({ "text": expected }),
+        );
+        let ctx = ToolContext {
+            workspace: &ws,
+            interactivity: Interactivity::NonInteractive,
+            trusted: true,
+        };
+        let result = registry
+            .dispatch(
+                &call,
+                &ctx,
+                &PermissionEngine::new(Profile::Default, Vec::new()),
+                &ScriptedApprover::always(),
+            )
+            .await;
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains(expected), "{}", result.output);
+    }
+}

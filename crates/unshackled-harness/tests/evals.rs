@@ -346,6 +346,8 @@ fn discovered_gate_auto_fixes_and_commits() {
     };
     let ratified = ratify_gate(&existing, &[], &[proposed]);
     std::fs::write(root.join(".unshackled.toml"), &ratified.config_text).unwrap();
+    git(root, &["add", ".unshackled.toml"]);
+    git(root, &["commit", "-m", "ratify gate"]);
 
     // The committed gate is loaded exactly as the CLI loads it.
     let config = load(&ConfigPaths::standard(root), &CliOverrides::default()).unwrap();

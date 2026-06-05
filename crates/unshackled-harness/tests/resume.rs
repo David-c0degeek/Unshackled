@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::json;
 use tokio::sync::broadcast;
@@ -13,8 +14,9 @@ use unshackled_config::{AutoFix, Cadence, CheckConfig, RuleSeverity};
 use unshackled_harness::{
     decide_step, resume_one_step, resume_one_step_with_events, CheckRunner, CompletionInputs,
     RuleEngine, RuntimeEvent, SessionConfig, SessionRuntime, StepAction, QUALITY_CHECK_TOOL,
+    QUOTA_PAUSE_KEY,
 };
-use unshackled_llm::FakeProvider;
+use unshackled_llm::{FakeProvider, ModelEvent, ProviderError, QuotaInfo};
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{
     classify_posix, classify_windows, CommandClass, Decision, Effect, Interactivity,
@@ -30,6 +32,20 @@ fn git(root: &Path, args: &[&str]) {
         .status()
         .unwrap();
     assert!(status.success(), "git {args:?} failed");
+}
+
+fn git_output(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 const PROGRESS: &str =
@@ -101,6 +117,12 @@ async fn resume_completes_a_step_with_a_commit_and_progress_update() {
 
     // Two new commits: the step and the progress update.
     assert_eq!(commit_count(root), commits_before + 2);
+    assert!(
+        git_output(root, &["ls-files", ".unshackled"])
+            .trim()
+            .is_empty(),
+        "runtime state must not be staged into harness commits"
+    );
 }
 
 #[tokio::test]
@@ -234,6 +256,32 @@ fn failing_check(name: &str, severity: Option<RuleSeverity>) -> CheckConfig {
     }
 }
 
+#[cfg(windows)]
+fn passing_test_command() -> &'static str {
+    "cmd /C dir marker.txt"
+}
+#[cfg(not(windows))]
+fn passing_test_command() -> &'static str {
+    "ls marker.txt"
+}
+
+#[cfg(windows)]
+fn destructive_test_command() -> &'static str {
+    "cmd /C del marker.txt"
+}
+#[cfg(not(windows))]
+fn destructive_test_command() -> &'static str {
+    "rm -rf marker.txt"
+}
+
+fn network_test_command() -> &'static str {
+    "curl https://example.invalid"
+}
+
+fn unknown_test_command() -> &'static str {
+    "definitely-not-a-real-program-xyzzy"
+}
+
 fn write_marker_call() -> serde_json::Value {
     json!({ "path": "marker.txt", "content": "x" })
 }
@@ -363,7 +411,7 @@ fn ratification_allowance_lets_the_gate_run_headless_but_grants_nothing_else() {
     // allowance is keyed to the gate identity, so it never authorizes arbitrary
     // shell.
     let request = |tool: &'static str| PermissionRequest {
-        tool,
+        tool: tool.to_string(),
         effect: Effect::RunCommand(CommandClass::ProjectWrite),
         interactivity: Interactivity::NonInteractive,
         trusted: true,
@@ -392,6 +440,8 @@ async fn an_unratified_check_never_runs() {
     let dir = sample_repo();
     let root = dir.path();
     std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+    git(root, &["add", "Cargo.toml"]);
+    git(root, &["commit", "-m", "add manifest"]);
 
     let provider = Arc::new(
         FakeProvider::new()
@@ -411,4 +461,135 @@ async fn an_unratified_check_never_runs() {
 
     assert!(outcome.committed, "{:?}", outcome.blocked_reason);
     assert!(outcome.gate.is_empty(), "no unratified check should run");
+}
+
+#[tokio::test]
+async fn legacy_test_command_is_denied_before_execution_for_risky_commands() {
+    for command in [
+        destructive_test_command(),
+        network_test_command(),
+        unknown_test_command(),
+    ] {
+        let dir = sample_repo();
+        let root = dir.path();
+        std::fs::write(root.join("marker.txt"), "keep").unwrap();
+        git(root, &["add", "marker.txt"]);
+        git(root, &["commit", "-m", "marker"]);
+
+        let provider = Arc::new(FakeProvider::new().text("done"));
+        let mut rt = SessionRuntime::new(
+            Arc::clone(&provider) as Arc<dyn unshackled_llm::ModelProvider>,
+            ToolRegistry::with_builtins(),
+            PermissionEngine::new(Profile::Default, Vec::new()),
+            Box::new(ScriptedApprover::always()),
+            Store::open(root),
+            Workspace::new(root).unwrap(),
+            RecoveryEngine::new(RecoveryBudget::default()),
+            SessionConfig {
+                interactivity: Interactivity::NonInteractive,
+                trusted: true,
+                ..SessionConfig::default()
+            },
+            Vec::new(),
+        );
+
+        let rules = RuleEngine::with_baseline(&Default::default());
+        let outcome = resume_one_step(&mut rt, root, &rules, Some(command), &[], 3)
+            .await
+            .unwrap();
+
+        assert!(!outcome.committed, "{command}");
+        assert!(
+            outcome
+                .blocked_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("test"),
+            "{command}: {:?}",
+            outcome.blocked_reason
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("marker.txt")).unwrap(),
+            "keep",
+            "{command} must not run"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_test_command_runs_through_the_mediated_gate_when_allowed() {
+    let dir = sample_repo();
+    let root = dir.path();
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call("c1", "write_file", write_marker_call())
+            .text("done"),
+    );
+    let mut rt = runtime(root, Arc::clone(&provider));
+
+    let rules = RuleEngine::with_baseline(&Default::default());
+    let outcome = resume_one_step(&mut rt, root, &rules, Some(passing_test_command()), &[], 3)
+        .await
+        .unwrap();
+
+    assert!(outcome.committed, "{:?}", outcome.blocked_reason);
+    assert!(outcome
+        .gate
+        .iter()
+        .any(|outcome| outcome.name == "test" && outcome.passed()));
+}
+
+#[tokio::test]
+async fn dirty_worktree_blocks_resume_before_provider_work() {
+    let dir = sample_repo();
+    let root = dir.path();
+    std::fs::write(root.join("user-note.txt"), "do not stage").unwrap();
+
+    let provider = Arc::new(FakeProvider::new().text("done"));
+    let mut rt = runtime(root, Arc::clone(&provider));
+    let rules = RuleEngine::with_baseline(&Default::default());
+
+    let outcome = resume_one_step(&mut rt, root, &rules, None, &[], 3)
+        .await
+        .unwrap();
+
+    assert!(!outcome.committed);
+    assert_eq!(provider.requests().len(), 0, "provider must not be called");
+    assert!(outcome
+        .blocked_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("no_stale_uncommitted"));
+    assert!(
+        git_output(root, &["diff", "--cached", "--name-only"])
+            .trim()
+            .is_empty(),
+        "dirty user file must not be staged"
+    );
+}
+
+#[tokio::test]
+async fn mid_stream_quota_error_persists_a_paused_resume_state() {
+    let dir = sample_repo();
+    let root = dir.path();
+    let quota = QuotaInfo {
+        retry_after: Some(Duration::from_secs(30)),
+        retryable: true,
+        raw_provider_code: Some("rate_limit_exceeded".to_string()),
+        ..QuotaInfo::default()
+    };
+    let provider = Arc::new(FakeProvider::new().script(vec![
+        Ok(ModelEvent::TextDelta("partial".to_string())),
+        Err(ProviderError::RateLimit { quota }),
+    ]));
+    let mut rt = runtime(root, Arc::clone(&provider));
+    let rules = RuleEngine::with_baseline(&Default::default());
+
+    let outcome = resume_one_step(&mut rt, root, &rules, None, &[], 3)
+        .await
+        .unwrap();
+
+    assert!(!outcome.committed);
+    assert!(outcome.paused, "{:?}", outcome.blocked_reason);
+    assert!(rt.store().get_cache(QUOTA_PAUSE_KEY).unwrap().is_some());
 }

@@ -63,20 +63,20 @@ impl ToolRegistry {
 
     /// The registered tool names.
     #[must_use]
-    pub fn names(&self) -> Vec<&'static str> {
+    pub fn names(&self) -> Vec<&str> {
         self.tools.iter().map(|t| t.name()).collect()
     }
 
     /// The registered tools' name + JSON schema pairs.
     #[must_use]
-    pub fn schemas(&self) -> Vec<(&'static str, Value)> {
+    pub fn schemas(&self) -> Vec<(&str, Value)> {
         self.tools.iter().map(|t| (t.name(), t.schema())).collect()
     }
 
     /// The registered tools' name, description, and JSON schema, for building
     /// provider tool specifications.
     #[must_use]
-    pub fn specs(&self) -> Vec<(&'static str, &'static str, Value)> {
+    pub fn specs(&self) -> Vec<(&str, &str, Value)> {
         self.tools
             .iter()
             .map(|t| (t.name(), t.description(), t.schema()))
@@ -112,7 +112,7 @@ impl ToolRegistry {
         let detail = target_detail(&call.input);
         for effect in &effects {
             let request = PermissionRequest {
-                tool: tool.name(),
+                tool: tool.name().to_string(),
                 effect: *effect,
                 interactivity: ctx.interactivity,
                 trusted: ctx.trusted,

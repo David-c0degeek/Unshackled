@@ -47,10 +47,10 @@ impl ToolOutput {
 #[async_trait]
 pub trait Tool: Send + Sync {
     /// The tool's stable name as exposed to the model.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
 
     /// A one-line description.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
 
     /// The JSON schema for this tool's input, generated from a typed struct.
     fn schema(&self) -> Value;

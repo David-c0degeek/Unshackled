@@ -11,11 +11,17 @@ normalization.
 ```rust
 #[async_trait]
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     fn schema(&self) -> serde_json::Value;
+    fn effects(&self, invocation: &ToolInvocation) -> ToolEffects;
     async fn invoke(&self, invocation: ToolInvocation) -> anyhow::Result<ToolOutput>;
 }
 ```
+
+Builtin tools normally return static string literals. Dynamically discovered
+tools, such as MCP tools, may return borrowed metadata from owned registry
+entries; dynamic metadata must not be forced into a static lifetime.
 
 ## Builtin Tools
 
@@ -144,4 +150,3 @@ Tool result text must be:
 - The harness cannot bypass permission policy.
 - Tool outputs are stored only after redaction.
 - A failed tool call is represented as data, not a process crash.
-

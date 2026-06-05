@@ -181,7 +181,7 @@ impl<'a> CheckRunner<'a> {
     async fn run_command(&self, program: &str, args: &[String]) -> RunResult {
         let class = classify(program, args);
         let request = PermissionRequest {
-            tool: QUALITY_CHECK_TOOL,
+            tool: QUALITY_CHECK_TOOL.to_string(),
             effect: Effect::RunCommand(class),
             interactivity: self.interactivity,
             trusted: self.trusted,
