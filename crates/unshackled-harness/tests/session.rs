@@ -2,13 +2,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use unshackled_core::{ContentBlock, Message};
 use unshackled_harness::{RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
-use unshackled_llm::{FakeProvider, ModelEvent};
+use unshackled_llm::{FakeProvider, ModelEvent, ProviderError, QuotaInfo};
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
 use unshackled_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use unshackled_store::Store;
@@ -679,6 +680,55 @@ async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() 
         })
         .unwrap();
     assert_eq!(assistant_text, "The complete answer.");
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|event| matches!(event, RuntimeEvent::Recovery { .. })));
+}
+
+#[tokio::test]
+async fn mid_stream_quota_error_stops_as_provider_error_and_emits_pause() {
+    let quota = QuotaInfo {
+        retry_after: Some(Duration::from_secs(45)),
+        retryable: true,
+        raw_provider_code: Some("rate_limit_exceeded".to_string()),
+        ..QuotaInfo::default()
+    };
+    let provider = FakeProvider::new().script(vec![
+        Ok(ModelEvent::TextDelta("partial answer".to_string())),
+        Err(ProviderError::RateLimit { quota }),
+    ]);
+    let mut h = build(provider, &[], SessionConfig::default());
+    let mut rx = h.events.subscribe();
+
+    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
+
+    assert_eq!(reason, StopReason::ProviderError);
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|event| matches!(event, RuntimeEvent::QuotaPaused { reset } if reset.contains("45"))));
+    let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
+    assert_eq!(
+        transcript.len(),
+        1,
+        "partial assistant text is not persisted"
+    );
+}
+
+#[tokio::test]
+async fn stream_decode_errors_still_use_bad_output_recovery() {
+    let provider = Arc::new(FakeProvider::new().malformed().text("recovered"));
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig::default(),
+        Profile::Default,
+    );
+    let mut rx = h.events.subscribe();
+
+    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
+
+    assert_eq!(reason, StopReason::Done);
+    assert_eq!(provider.requests().len(), 2);
     assert!(drain(&mut rx)
         .iter()
         .any(|event| matches!(event, RuntimeEvent::Recovery { .. })));

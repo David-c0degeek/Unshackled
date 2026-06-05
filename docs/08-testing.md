@@ -177,9 +177,12 @@ cargo test --workspace
 cargo check --workspace
 ```
 
-Optional:
+Supply-chain hygiene:
 
 ```powershell
 cargo audit
 cargo deny check
+cargo machete
 ```
+
+These are blocking before public release and run in CI's supply-chain job.

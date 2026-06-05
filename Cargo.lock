@@ -2611,6 +2611,7 @@ dependencies = [
 name = "unshackled-sandbox"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "proptest",
  "tempfile",
  "thiserror",

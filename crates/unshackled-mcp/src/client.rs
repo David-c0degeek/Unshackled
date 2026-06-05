@@ -117,8 +117,8 @@ fn extract_text(result: &Value) -> String {
 /// permission engine gates it exactly like a builtin tool, and its output is
 /// redacted by the same registry dispatch — MCP is never a side channel.
 pub struct McpTool {
-    name: &'static str,
-    description: &'static str,
+    name: String,
+    description: String,
     schema: Value,
     effects: Vec<Effect>,
     transport: Arc<dyn Transport>,
@@ -133,15 +133,12 @@ impl McpTool {
         transport: Arc<dyn Transport>,
     ) -> Self {
         Self {
-            name: Box::leak(descriptor.name.clone().into_boxed_str()),
-            description: Box::leak(
-                if descriptor.description.is_empty() {
-                    "MCP tool".to_string()
-                } else {
-                    descriptor.description.clone()
-                }
-                .into_boxed_str(),
-            ),
+            name: descriptor.name.clone(),
+            description: if descriptor.description.is_empty() {
+                "MCP tool".to_string()
+            } else {
+                descriptor.description.clone()
+            },
             schema: descriptor.input_schema.clone(),
             effects,
             transport,
@@ -151,12 +148,12 @@ impl McpTool {
 
 #[async_trait]
 impl Tool for McpTool {
-    fn name(&self) -> &'static str {
-        self.name
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    fn description(&self) -> &'static str {
-        self.description
+    fn description(&self) -> &str {
+        &self.description
     }
 
     fn schema(&self) -> Value {
@@ -170,7 +167,7 @@ impl Tool for McpTool {
     async fn invoke(&self, input: Value, _ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
         let client = McpClient::new(Arc::clone(&self.transport));
         let text = client
-            .call_tool(self.name, input)
+            .call_tool(&self.name, input)
             .await
             .map_err(|e| ToolError::Failed(e.to_string()))?;
         Ok(ToolOutput::ok(text))

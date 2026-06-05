@@ -84,3 +84,22 @@ representative dogfood tasks. If live validation is blocked by credentials,
 budget, or model availability, record it as an explicit accepted limitation and
 keep the live run as ongoing development validation rather than leaving a plan
 box vaguely open.
+
+## Harness-owned commands
+
+Harness-owned shell commands should enter the same quality-check runner used by
+ratified checks as early as possible. A second command-execution path is a
+permission-drift risk, even if it currently only runs repository configuration.
+
+## Submodule dependency hygiene
+
+When supply-chain fixes touch a git submodule, verify the nested repository on
+its own and then handle superproject pointer movement as a separate release
+step. A clean root status does not prove the submodule change has been committed
+or published.
+
+## Dynamic tool metadata
+
+Dynamic tools should own their metadata in registry/tool entries and expose it
+through borrowed accessors. Leaking heap strings to satisfy a static trait
+lifetime makes registry rebuild behavior harder to reason about.

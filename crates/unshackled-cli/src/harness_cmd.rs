@@ -434,13 +434,13 @@ where
     let workspace = Workspace::new(root)?;
     let rules = RuleEngine::with_baseline(&config.harness.rules);
     let test_command = config.harness.test_command.clone();
-    let checks = config.harness.resolved_checks();
+    let checks = config.harness.checks.clone();
     let max_attempts = config.harness.attempts_per_step;
     // Ratifying the gate grants its tool identity a relaxed-profile allowance, so
     // a non-interactive run can execute the (project-write) checks the user
     // committed without prompting (ADR-0009). The allowance is scoped to the gate
     // identity, which only ever runs ratified checks — never arbitrary shell.
-    let gate_allowance = if checks.is_empty() {
+    let gate_allowance = if checks.is_empty() && test_command.is_none() {
         Vec::new()
     } else {
         vec![QUALITY_CHECK_TOOL.to_string()]

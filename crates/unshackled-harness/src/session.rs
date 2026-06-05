@@ -438,8 +438,14 @@ impl SessionRuntime {
                         Some(Ok(_)) => {}
                         Some(Err(err)) => {
                             self.last_quota = err.quota().cloned();
+                            if let Some(reset) = self.last_quota.as_ref().map(quota_reset_label) {
+                                let _ = events.send(RuntimeEvent::QuotaPaused { reset });
+                            }
                             let _ = events
                                 .send(RuntimeEvent::Warning(format!("stream error: {err}")));
+                            if stream_error_stops_turn(&err) {
+                                return self.stop(events, StopReason::ProviderError);
+                            }
                             stream_failed = true;
                             break;
                         }
@@ -606,6 +612,10 @@ fn invalid_tool_calls(calls: &[(String, String, serde_json::Value)]) -> Option<S
         }
     }
     None
+}
+
+fn stream_error_stops_turn(err: &ProviderError) -> bool {
+    !matches!(err, ProviderError::StreamDecode(_))
 }
 
 fn is_compaction_summary(message: &Message) -> bool {
