@@ -5,8 +5,8 @@ use ratatui::backend::{Backend, TestBackend};
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 use unshackled_tui::{
-    handle_input, render, run, AppInput, AppState, ApprovalRequest, Header, Key, Mode, Picker,
-    Profile, ThinkingPanel, TranscriptLine, TrustPrompt, UiEvent,
+    handle_input, parse_slash, render, run, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
+    Picker, Profile, SlashAction, ThinkingPanel, TranscriptLine, TrustPrompt, UiEvent,
 };
 
 fn header() -> Header {
@@ -148,6 +148,13 @@ fn a_slash_command_triggers_the_matching_action() {
     handle_input(&mut state, AppInput::Key(Key::Enter));
     assert!(state.thinking.visible, "/think should toggle the panel");
     assert!(state.input.is_empty(), "input is cleared after a command");
+}
+
+#[test]
+fn resume_slash_commands_are_parsed_for_the_host() {
+    assert_eq!(parse_slash("/resume"), Some(SlashAction::Resume));
+    assert_eq!(parse_slash("/wait-resume"), Some(SlashAction::WaitResume));
+    assert_eq!(parse_slash("/wait_resume"), Some(SlashAction::WaitResume));
 }
 
 #[test]

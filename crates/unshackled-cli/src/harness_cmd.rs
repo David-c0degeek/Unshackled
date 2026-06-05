@@ -8,16 +8,20 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use unshackled_config::{CliOverrides, Config, ConfigPaths};
 use unshackled_harness::{
-    propose_gate, ratify_gate, resume_one_step, run_intake, run_plan, summarize_proposal, Brief,
-    CheckOutcome, CheckStatus, Progress, RuleEngine, SessionConfig, SessionRuntime,
-    QUALITY_CHECK_TOOL, QUOTA_PAUSE_KEY,
+    propose_gate, ratify_gate, resume_one_step_with_events, run_intake, run_plan,
+    summarize_proposal, Brief, CheckOutcome, CheckStatus, Progress, RuleEngine, RuntimeEvent,
+    SessionConfig, SessionRuntime, QUALITY_CHECK_TOOL, QUOTA_PAUSE_KEY,
 };
 use unshackled_llm::{ModelProvider, ProviderRegistry};
 use unshackled_quota::{decide_resume, PausedRun, ResumeContext, ResumeDecision, ResumePolicy};
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
-use unshackled_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
+use unshackled_sandbox::{
+    Approver, Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace,
+};
 use unshackled_store::Store;
 
 const DEFAULT_CONFIG: &str = "[harness]\n\
@@ -376,6 +380,54 @@ pub async fn resume(
     profile: Profile,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    let (events, _rx) = broadcast::channel::<RuntimeEvent>(1024);
+    let cancel = CancellationToken::new();
+    resume_with_events(
+        root,
+        model,
+        provider_id,
+        ResumeRun {
+            profile,
+            interactivity: Interactivity::NonInteractive,
+            trusted: true,
+            approver: || Box::new(ScriptedApprover::new(Vec::new())),
+        },
+        &events,
+        &cancel,
+        out,
+    )
+    .await
+}
+
+/// Runtime settings for a harness resume run.
+pub struct ResumeRun<A>
+where
+    A: FnMut() -> Box<dyn Approver>,
+{
+    pub profile: Profile,
+    pub interactivity: Interactivity,
+    pub trusted: bool,
+    pub approver: A,
+}
+
+/// Run harness steps from `PROGRESS.md` while streaming runtime events to
+/// `events`. The CLI uses this with a silent event channel; the TUI subscribes to
+/// the same stream and renders model, tool, quota, and approval progress live.
+///
+/// # Errors
+/// Returns an error if config/provider setup or a step fails.
+pub async fn resume_with_events<A>(
+    root: &Path,
+    model: &str,
+    provider_id: Option<&str>,
+    mut run: ResumeRun<A>,
+    events: &broadcast::Sender<RuntimeEvent>,
+    cancel: &CancellationToken,
+    out: &mut dyn Write,
+) -> anyhow::Result<()>
+where
+    A: FnMut() -> Box<dyn Approver>,
+{
     let config = unshackled_config::load(&ConfigPaths::standard(root), &CliOverrides::default())
         .unwrap_or_else(|_| Config::default());
     let provider = provider_for(root, provider_id)?;
@@ -411,20 +463,25 @@ pub async fn resume(
             root,
             Arc::clone(&provider),
             workspace.clone(),
-            profile,
+            run.profile,
+            run.interactivity,
+            run.trusted,
             model,
             &mcp,
             config.harness.context_token_limit,
             gate_allowance.clone(),
+            (run.approver)(),
         );
         crate::context_inject::seed(root, &mut runtime, &step_description);
-        let outcome = resume_one_step(
+        let outcome = resume_one_step_with_events(
             &mut runtime,
             root,
             &rules,
             test_command.as_deref(),
             &checks,
             max_attempts,
+            events,
+            cancel,
         )
         .await?;
         let gate = render_gate(&outcome.gate);
@@ -477,6 +534,42 @@ pub async fn wait_resume(
     profile: Profile,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    let (events, _rx) = broadcast::channel::<RuntimeEvent>(1024);
+    let cancel = CancellationToken::new();
+    wait_resume_with_events(
+        root,
+        model,
+        provider_id,
+        ResumeRun {
+            profile,
+            interactivity: Interactivity::NonInteractive,
+            trusted: true,
+            approver: || Box::new(ScriptedApprover::new(Vec::new())),
+        },
+        &events,
+        &cancel,
+        out,
+    )
+    .await
+}
+
+/// Continue a quota-paused run through the streaming resume path, if allowed by
+/// policy.
+///
+/// # Errors
+/// Returns an error if the paused-run file is unreadable or resume fails.
+pub async fn wait_resume_with_events<A>(
+    root: &Path,
+    model: &str,
+    provider_id: Option<&str>,
+    run: ResumeRun<A>,
+    events: &broadcast::Sender<RuntimeEvent>,
+    cancel: &CancellationToken,
+    out: &mut dyn Write,
+) -> anyhow::Result<()>
+where
+    A: FnMut() -> Box<dyn Approver>,
+{
     let store = Store::open(root);
     let Some(bytes) = store.get_cache(QUOTA_PAUSE_KEY)? else {
         writeln!(out, "no paused run")?;
@@ -503,7 +596,7 @@ pub async fn wait_resume(
         ResumeDecision::Resume => {
             writeln!(out, "resuming paused run at step {}", paused.step_number)?;
             store.delete_cache(QUOTA_PAUSE_KEY)?;
-            resume(root, model, provider_id, profile, out).await?;
+            resume_with_events(root, model, provider_id, run, events, cancel, out).await?;
         }
         ResumeDecision::Wait => {
             let eta = paused
@@ -545,23 +638,26 @@ fn build_runtime(
     provider: Arc<dyn ModelProvider>,
     workspace: Workspace,
     profile: Profile,
+    interactivity: Interactivity,
+    trusted: bool,
     model: &str,
     mcp: &crate::mcp::McpTools,
     context_token_limit: usize,
     allowlist: Vec<String>,
+    approver: Box<dyn Approver>,
 ) -> SessionRuntime {
     SessionRuntime::new(
         provider,
         mcp.registry(),
         PermissionEngine::new(profile, allowlist),
-        Box::new(ScriptedApprover::new(Vec::new())),
+        approver,
         Store::open(root),
         workspace,
         RecoveryEngine::new(RecoveryBudget::default()),
         SessionConfig {
             model: model.to_string(),
-            interactivity: Interactivity::NonInteractive,
-            trusted: true,
+            interactivity,
+            trusted,
             context_token_limit,
             ..SessionConfig::default()
         },

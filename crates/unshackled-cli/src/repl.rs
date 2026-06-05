@@ -30,8 +30,8 @@ use unshackled_sandbox::{
 };
 use unshackled_store::Store;
 use unshackled_tui::{
-    handle_input, render, AppInput, AppState, ApprovalRequest, Header, Key, Mode, PlanItem,
-    Profile as UiProfile, TrustPrompt, UiEvent,
+    handle_input, parse_slash, render, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
+    PlanItem, Profile as UiProfile, SlashAction, TrustPrompt, UiEvent,
 };
 
 use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit};
@@ -41,6 +41,15 @@ use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit};
 struct ApprovalCall {
     request: ApprovalRequest,
     reply: oneshot::Sender<bool>,
+}
+
+/// Host context needed by slash commands that leave pure UI state and run CLI
+/// workflows.
+struct CommandHost<'a> {
+    approval_tx: mpsc::UnboundedSender<ApprovalCall>,
+    cwd: &'a std::path::Path,
+    model: &'a str,
+    provider_id: Option<&'a str>,
 }
 
 /// An [`Approver`] that suspends the turn and asks the user through the TUI.
@@ -138,7 +147,9 @@ pub async fn run_chat(
         provider,
         crate::mcp::McpTools::load(&config).await.registry(),
         PermissionEngine::new(profile, Vec::new()),
-        Box::new(TuiApprover { tx: approval_tx }),
+        Box::new(TuiApprover {
+            tx: approval_tx.clone(),
+        }),
         Store::open(&cwd),
         Workspace::new(&cwd)?,
         RecoveryEngine::new(RecoveryBudget::default()),
@@ -181,7 +192,12 @@ pub async fn run_chat(
         &mut state,
         &mut runtime,
         &mut approval_rx,
-        &cwd,
+        CommandHost {
+            approval_tx,
+            cwd: &cwd,
+            model: &model,
+            provider_id,
+        },
     )
     .await;
     leave_terminal(&mut terminal)?;
@@ -195,7 +211,7 @@ async fn event_loop(
     state: &mut AppState,
     runtime: &mut SessionRuntime,
     approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
-    cwd: &std::path::Path,
+    host: CommandHost<'_>,
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, state))?;
@@ -213,7 +229,7 @@ async fn event_loop(
                             handle_input(state, AppInput::Key(mapped));
                         }
                         if state.trusted {
-                            crate::trust::remember(cwd);
+                            crate::trust::remember(host.cwd);
                         }
                     } else if is_newline(key, &state.input) {
                         state.insert_input_newline();
@@ -224,15 +240,19 @@ async fn event_loop(
                         state.input_cursor = 0;
                         let prompt = state.expand_pastes(&shown);
                         state.pastes.clear();
-                        // Seed relevant accepted memory for this prompt (no-op
-                        // without the learning feature or when nothing matches).
-                        crate::context_inject::seed(cwd, runtime, &prompt);
                         state.apply(UiEvent::UserMessage(shown));
-                        state.busy = true;
-                        let outcome =
-                            run_turn(terminal, state, runtime, approval_rx, &prompt).await;
-                        state.busy = false;
-                        outcome?;
+                        if let Some(action) = parse_slash(&prompt) {
+                            run_slash(terminal, state, runtime, approval_rx, &host, action).await?;
+                        } else {
+                            // Seed relevant accepted memory for this prompt (no-op
+                            // without the learning feature or when nothing matches).
+                            crate::context_inject::seed(host.cwd, runtime, &prompt);
+                            state.busy = true;
+                            let outcome =
+                                run_turn(terminal, state, runtime, approval_rx, &prompt).await;
+                            state.busy = false;
+                            outcome?;
+                        }
                     } else if let Some(mapped) = map_key(key) {
                         handle_input(state, AppInput::Key(mapped));
                     }
@@ -251,6 +271,114 @@ async fn event_loop(
     }
 }
 
+async fn run_slash(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    state: &mut AppState,
+    runtime: &mut SessionRuntime,
+    approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
+    host: &CommandHost<'_>,
+    action: SlashAction,
+) -> anyhow::Result<()> {
+    match action {
+        SlashAction::SetMode(mode) => state.mode = mode,
+        SlashAction::SetProfile(profile) => {
+            state.profile = profile;
+            runtime.set_permission_profile(sandbox_profile(profile), Vec::new());
+        }
+        SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::Resume => {
+            state.mode = Mode::Harness;
+            state.apply(UiEvent::Notice("running harness resume".to_string()));
+            run_harness_command(terminal, state, approval_rx, host, false).await?;
+        }
+        SlashAction::WaitResume => {
+            state.mode = Mode::Harness;
+            state.apply(UiEvent::Notice("checking paused harness run".to_string()));
+            run_harness_command(terminal, state, approval_rx, host, true).await?;
+        }
+        SlashAction::Quit => state.should_quit = true,
+        SlashAction::Unknown(command) => {
+            state.apply(UiEvent::Notice(format!(
+                "unknown slash command: /{command}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn run_harness_command(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    state: &mut AppState,
+    approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
+    host: &CommandHost<'_>,
+    wait_resume: bool,
+) -> anyhow::Result<()> {
+    let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
+    let cancel = CancellationToken::new();
+    let started = std::time::Instant::now();
+    let profile = sandbox_profile(state.profile);
+    let trusted = state.trusted;
+    let tx = host.approval_tx.clone();
+    let operation_events = events.clone();
+    let operation_cancel = cancel.clone();
+    let cwd = host.cwd;
+    let model = host.model;
+    let provider_id = host.provider_id;
+    state.busy = true;
+
+    let operation = async move {
+        let mut output = Vec::new();
+        let run = crate::harness_cmd::ResumeRun {
+            profile,
+            interactivity: Interactivity::Interactive,
+            trusted,
+            approver: move || Box::new(TuiApprover { tx: tx.clone() }) as Box<dyn Approver>,
+        };
+        if wait_resume {
+            crate::harness_cmd::wait_resume_with_events(
+                cwd,
+                model,
+                provider_id,
+                run,
+                &operation_events,
+                &operation_cancel,
+                &mut output,
+            )
+            .await?;
+        } else {
+            crate::harness_cmd::resume_with_events(
+                cwd,
+                model,
+                provider_id,
+                run,
+                &operation_events,
+                &operation_cancel,
+                &mut output,
+            )
+            .await?;
+        }
+        Ok(String::from_utf8_lossy(&output).into_owned())
+    };
+
+    let summary = drive_runtime_operation(
+        terminal,
+        state,
+        approval_rx,
+        &mut rx,
+        &cancel,
+        started,
+        operation,
+    )
+    .await;
+    state.busy = false;
+    let summary = summary?;
+    let summary = summary.trim();
+    if !summary.is_empty() {
+        state.apply(UiEvent::Notice(summary.to_string()));
+    }
+    Ok(())
+}
+
 async fn run_turn(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     state: &mut AppState,
@@ -261,15 +389,42 @@ async fn run_turn(
     let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
     let cancel = CancellationToken::new();
     let started = std::time::Instant::now();
-    let turn = runtime.run_turn(prompt, &events, &cancel);
-    tokio::pin!(turn);
+    let turn = async {
+        let _ = runtime.run_turn(prompt, &events, &cancel).await;
+        Ok(())
+    };
+    drive_runtime_operation(
+        terminal,
+        state,
+        approval_rx,
+        &mut rx,
+        &cancel,
+        started,
+        turn,
+    )
+    .await
+}
+
+async fn drive_runtime_operation<F, T>(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    state: &mut AppState,
+    approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
+    rx: &mut broadcast::Receiver<RuntimeEvent>,
+    cancel: &CancellationToken,
+    started: std::time::Instant,
+    operation: F,
+) -> anyhow::Result<T>
+where
+    F: Future<Output = anyhow::Result<T>>,
+{
+    tokio::pin!(operation);
 
     // The reply channel for an approval the user has not yet answered.
     let mut pending: Option<oneshot::Sender<bool>> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    loop {
+    let value = loop {
         tokio::select! {
             biased;
             _ = tick.tick() => {
@@ -281,11 +436,11 @@ async fn run_turn(
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
-                    pending = resolve_event(state, pending, event::read()?, &cancel);
+                    pending = resolve_event(state, pending, event::read()?, cancel);
                 }
                 terminal.draw(|frame| render(frame, state))?;
             }
-            _ = &mut turn => {
+            result = &mut operation => {
                 // Drain any events still buffered so a fast response is not lost
                 // when the turn future completes in the same poll. Continue past
                 // Lagged errors: the receiver advances to the oldest available
@@ -302,7 +457,7 @@ async fn run_turn(
                     }
                 }
                 state.apply(UiEvent::TurnComplete);
-                break;
+                break result?;
             }
             Some(call) = approval_rx.recv() => {
                 state.apply(UiEvent::ApprovalRequested(call.request));
@@ -320,9 +475,9 @@ async fn run_turn(
                 }
             }
         }
-    }
+    };
     terminal.draw(|frame| render(frame, state))?;
-    Ok(())
+    Ok(value)
 }
 
 /// Apply a terminal event received mid-turn. Approval dialogs capture their
@@ -487,6 +642,14 @@ fn ui_profile(profile: Profile) -> UiProfile {
         Profile::Default => UiProfile::Default,
         Profile::Relaxed => UiProfile::Relaxed,
         Profile::Bypass => UiProfile::Bypass,
+    }
+}
+
+fn sandbox_profile(profile: UiProfile) -> Profile {
+    match profile {
+        UiProfile::Default => Profile::Default,
+        UiProfile::Relaxed => Profile::Relaxed,
+        UiProfile::Bypass => Profile::Bypass,
     }
 }
 

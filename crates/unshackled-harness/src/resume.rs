@@ -69,6 +69,40 @@ pub async fn resume_one_step(
     checks: &[CheckConfig],
     max_attempts: u32,
 ) -> Result<ResumeOutcome, HarnessError> {
+    let (events, _rx) = broadcast::channel::<RuntimeEvent>(256);
+    let cancel = CancellationToken::new();
+    resume_one_step_with_events(
+        runtime,
+        root,
+        rule_engine,
+        test_command,
+        checks,
+        max_attempts,
+        &events,
+        &cancel,
+    )
+    .await
+}
+
+/// Run the next incomplete step while streaming runtime events to `events` and
+/// honoring `cancel`. This is the same harness loop as [`resume_one_step`], but
+/// host UIs can subscribe to the event stream instead of waiting for the final
+/// outcome.
+///
+/// # Errors
+/// Returns [`HarnessError`] if the project files cannot be read/written or git
+/// operations fail.
+#[allow(clippy::too_many_arguments)] // the host owns event/cancel wiring
+pub async fn resume_one_step_with_events(
+    runtime: &mut SessionRuntime,
+    root: &Path,
+    rule_engine: &RuleEngine,
+    test_command: Option<&str>,
+    checks: &[CheckConfig],
+    max_attempts: u32,
+    events: &broadcast::Sender<RuntimeEvent>,
+    cancel: &CancellationToken,
+) -> Result<ResumeOutcome, HarnessError> {
     let progress_path = root.join("PROGRESS.md");
     let mut progress = Progress::parse(&read(&progress_path)?)?;
     let step = progress
@@ -79,8 +113,6 @@ pub async fn resume_one_step(
         })?
         .clone();
 
-    let (events, _rx) = broadcast::channel::<RuntimeEvent>(256);
-    let cancel = CancellationToken::new();
     let commit_message = format!("harness: {}", step.description);
 
     // The anti-sunk-cost loop owns the attempt/replan budget; each pass works the
@@ -92,7 +124,7 @@ pub async fn resume_one_step(
     let mut final_gate: Vec<CheckOutcome>;
 
     loop {
-        let reason = runtime.run_turn(&prompt, &events, &cancel).await;
+        let reason = runtime.run_turn(&prompt, events, cancel).await;
 
         // A provider quota/rate error pauses the run cleanly at this step
         // boundary: persist an inspectable PausedRun and stop without committing.
