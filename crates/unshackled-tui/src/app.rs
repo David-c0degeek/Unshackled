@@ -45,9 +45,13 @@ pub enum SlashAction {
     SetMode(Mode),
     SetProfile(Profile),
     ToggleThinking,
+    Clear,
+    Compact,
+    Search(Option<String>),
     Resume,
     WaitResume,
     Quit,
+    Invalid { command: String, reason: String },
     Unknown(String),
 }
 
@@ -55,17 +59,55 @@ pub enum SlashAction {
 #[must_use]
 pub fn parse_slash(line: &str) -> Option<SlashAction> {
     let command = line.trim().strip_prefix('/')?.trim();
+    let (name, args) = command
+        .split_once(char::is_whitespace)
+        .map_or((command, ""), |(name, args)| (name, args.trim()));
     Some(match command {
-        "agent" => SlashAction::SetMode(Mode::Agent),
-        "harness" => SlashAction::SetMode(Mode::Harness),
-        "default" => SlashAction::SetProfile(Profile::Default),
-        "relaxed" => SlashAction::SetProfile(Profile::Relaxed),
-        "bypass" => SlashAction::SetProfile(Profile::Bypass),
-        "think" | "thinking" => SlashAction::ToggleThinking,
-        "resume" => SlashAction::Resume,
-        "wait-resume" | "wait_resume" => SlashAction::WaitResume,
-        "quit" | "q" => SlashAction::Quit,
-        other => SlashAction::Unknown(other.to_string()),
+        _ if name == "agent" && args.is_empty() => SlashAction::SetMode(Mode::Agent),
+        _ if name == "harness" && args.is_empty() => SlashAction::SetMode(Mode::Harness),
+        _ if name == "default" && args.is_empty() => SlashAction::SetProfile(Profile::Default),
+        _ if name == "relaxed" && args.is_empty() => SlashAction::SetProfile(Profile::Relaxed),
+        _ if name == "bypass" && args.is_empty() => SlashAction::SetProfile(Profile::Bypass),
+        _ if matches!(name, "think" | "thinking") && args.is_empty() => SlashAction::ToggleThinking,
+        _ if name == "clear" && args.is_empty() => SlashAction::Clear,
+        _ if name == "compact" && args.is_empty() => SlashAction::Compact,
+        _ if name == "search" => {
+            let query = if args.is_empty() {
+                None
+            } else {
+                Some(args.to_string())
+            };
+            SlashAction::Search(query)
+        }
+        _ if name == "resume" && args.is_empty() => SlashAction::Resume,
+        _ if matches!(name, "wait-resume" | "wait_resume") && args.is_empty() => {
+            SlashAction::WaitResume
+        }
+        _ if matches!(name, "quit" | "q") && args.is_empty() => SlashAction::Quit,
+        _ if matches!(
+            name,
+            "agent"
+                | "harness"
+                | "default"
+                | "relaxed"
+                | "bypass"
+                | "think"
+                | "thinking"
+                | "clear"
+                | "compact"
+                | "resume"
+                | "wait-resume"
+                | "wait_resume"
+                | "quit"
+                | "q"
+        ) =>
+        {
+            SlashAction::Invalid {
+                command: name.to_string(),
+                reason: "this command does not take arguments".to_string(),
+            }
+        }
+        _ => SlashAction::Unknown(command.to_string()),
     })
 }
 
@@ -151,6 +193,14 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
         SlashAction::SetMode(mode) => state.mode = mode,
         SlashAction::SetProfile(profile) => state.profile = profile,
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::Clear => {
+            state.clear_conversation_view();
+            state.apply(UiEvent::Notice("conversation cleared".to_string()));
+        }
+        SlashAction::Compact => state.apply(UiEvent::Notice(
+            "/compact is handled by the interactive host".to_string(),
+        )),
+        SlashAction::Search(query) => state.set_search(query),
         SlashAction::Resume => state.apply(UiEvent::Notice(
             "/resume is handled by the interactive host".to_string(),
         )),
@@ -158,6 +208,9 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
             "/wait-resume is handled by the interactive host".to_string(),
         )),
         SlashAction::Quit => state.should_quit = true,
+        SlashAction::Invalid { command, reason } => {
+            state.apply(UiEvent::Notice(format!("invalid /{command}: {reason}")));
+        }
         SlashAction::Unknown(_) => {}
     }
 }

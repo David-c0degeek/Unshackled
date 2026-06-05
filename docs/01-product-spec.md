@@ -209,6 +209,19 @@ An always-on terminal session with:
 - always-visible footer stats
 - optional thinking/reasoning side panel
 
+Interactive slash commands are REPL-scoped:
+
+- `/clear` clears the visible conversation and runtime message history while
+  preserving the session id, workspace, trust decision, provider/model, mode,
+  and permission profile.
+- `/compact` manually applies the same context compaction rules used before
+  provider requests, then reports whether history was compacted and shows the
+  resulting context usage.
+- `/search <query>` highlights transcript lines containing the exact query;
+  `/search` clears the active search.
+- `/resume` and `/wait-resume` run the corresponding harness workflows inside
+  the interactive session.
+
 ### Harness CLI
 
 Scriptable commands:

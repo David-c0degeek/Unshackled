@@ -339,6 +339,29 @@ impl AppState {
         expanded
     }
 
+    /// Clear the visible conversation while preserving session identity,
+    /// profile, mode, trust, and provider/model display.
+    pub fn clear_conversation_view(&mut self) {
+        self.transcript.clear();
+        self.streaming.clear();
+        self.transcript_scroll = 0;
+        self.search = None;
+        self.thinking.text.clear();
+        self.plan.clear();
+        self.active_tools.clear();
+        self.approval = None;
+        self.picker = None;
+        self.busy = false;
+        self.spinner = 0;
+        self.working_secs = 0;
+        self.footer = FooterStats::default();
+    }
+
+    /// Set or clear the active transcript search query.
+    pub fn set_search(&mut self, query: Option<String>) {
+        self.search = query.filter(|q| !q.is_empty());
+    }
+
     /// Scroll the transcript upward by rendered rows.
     pub fn scroll_transcript_up(&mut self, rows: usize) {
         let max_scroll = self.transcript_logical_rows().saturating_sub(1);

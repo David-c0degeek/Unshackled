@@ -158,6 +158,81 @@ fn resume_slash_commands_are_parsed_for_the_host() {
 }
 
 #[test]
+fn clear_compact_and_search_slash_commands_are_parsed() {
+    assert_eq!(parse_slash("/clear"), Some(SlashAction::Clear));
+    assert_eq!(parse_slash("/compact"), Some(SlashAction::Compact));
+    assert_eq!(
+        parse_slash("/search parser errors"),
+        Some(SlashAction::Search(Some("parser errors".to_string())))
+    );
+    assert_eq!(parse_slash("/search"), Some(SlashAction::Search(None)));
+    assert_eq!(parse_slash("/q"), Some(SlashAction::Quit));
+    assert!(matches!(
+        parse_slash("/clear now"),
+        Some(SlashAction::Invalid { command, .. }) if command == "clear"
+    ));
+    assert_eq!(
+        parse_slash("/not-a-command"),
+        Some(SlashAction::Unknown("not-a-command".to_string()))
+    );
+}
+
+#[test]
+fn search_command_sets_and_clears_search_without_changing_transcript() {
+    let mut state = base();
+    let original = state.transcript.clone();
+
+    state.input = "/search parser".to_string();
+    state.input_cursor = state.input.len();
+    handle_input(&mut state, AppInput::Key(Key::Enter));
+
+    assert_eq!(state.search, Some("parser".to_string()));
+    assert_eq!(state.transcript.len(), original.len());
+    assert_eq!(state.transcript[0].text, original[0].text);
+    assert!(render_string(&state, 90, 18).contains("search: parser"));
+
+    state.input = "/search".to_string();
+    state.input_cursor = state.input.len();
+    handle_input(&mut state, AppInput::Key(Key::Enter));
+
+    assert!(state.search.is_none());
+    assert_eq!(state.transcript.len(), original.len());
+}
+
+#[test]
+fn clear_command_resets_conversation_view_but_keeps_session_settings() {
+    let mut state = base();
+    state.mode = Mode::Harness;
+    state.profile = Profile::Bypass;
+    state.trusted = true;
+    state.search = Some("parser".to_string());
+    state.streaming = "partial".to_string();
+    state.thinking.text = "reasoning".to_string();
+    state.plan = vec![unshackled_tui::PlanItem {
+        title: "step".to_string(),
+        status: "in_progress".to_string(),
+    }];
+    let session_id = state.header.session_id.clone();
+
+    state.input = "/clear".to_string();
+    state.input_cursor = state.input.len();
+    handle_input(&mut state, AppInput::Key(Key::Enter));
+
+    assert_eq!(state.mode, Mode::Harness);
+    assert_eq!(state.profile, Profile::Bypass);
+    assert!(state.trusted);
+    assert_eq!(state.header.session_id, session_id);
+    assert!(state.streaming.is_empty());
+    assert!(state.search.is_none());
+    assert!(state.thinking.text.is_empty());
+    assert!(state.plan.is_empty());
+    assert_eq!(state.footer.context_limit, 0);
+    assert_eq!(state.transcript.len(), 1);
+    assert_eq!(state.transcript[0].speaker, "system");
+    assert!(state.transcript[0].text.contains("cleared"));
+}
+
+#[test]
 fn transcript_splits_multiline_assistant_responses() {
     let mut state = base();
     // Replace the single-line assistant message with a multiline one.
