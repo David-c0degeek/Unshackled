@@ -374,9 +374,7 @@ impl AppState {
         match event {
             UiEvent::TextDelta(delta) => {
                 let delta = if self.streaming.is_empty() {
-                    delta
-                        .trim_start_matches(|ch| matches!(ch, '\r' | '\n'))
-                        .to_string()
+                    delta.trim_start_matches(['\r', '\n']).to_string()
                 } else {
                     delta
                 };

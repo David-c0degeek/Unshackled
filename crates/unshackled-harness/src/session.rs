@@ -19,7 +19,7 @@ use unshackled_llm::{
 use unshackled_recovery::{
     detect, is_repeated_token_loop, is_slash_flood, ModelHealth, RecoveryEngine,
 };
-use unshackled_sandbox::{Approver, Interactivity, PermissionEngine};
+use unshackled_sandbox::{Approver, Interactivity, PermissionEngine, Profile};
 use unshackled_store::Store;
 use unshackled_tools::{ToolContext, ToolRegistry};
 
@@ -193,6 +193,12 @@ impl SessionRuntime {
     #[must_use]
     pub fn last_quota(&self) -> Option<&QuotaInfo> {
         self.last_quota.as_ref()
+    }
+
+    /// Replace the active permission profile for subsequent turns. Interactive
+    /// hosts use this when a slash command changes profile mid-session.
+    pub fn set_permission_profile(&mut self, profile: Profile, allowlist: Vec<String>) {
+        self.engine = PermissionEngine::new(profile, allowlist);
     }
 
     /// Run the quality-gate checks whose cadence maps to `trigger`, through this
@@ -525,7 +531,7 @@ impl SessionRuntime {
 }
 
 fn trim_leading_blank_lines(mut text: String) -> String {
-    let trimmed = text.trim_start_matches(|ch| matches!(ch, '\r' | '\n'));
+    let trimmed = text.trim_start_matches(['\r', '\n']);
     if trimmed.len() != text.len() {
         text.drain(..text.len() - trimmed.len());
     }

@@ -1,13 +1,20 @@
-Unshackled 0.1.0
-platform: <platform>
-cwd: <workspace>
-config:
-  project: <workspace>/.unshackled.toml (present)
+Unshackled <version>
+
+platform:
+  os:   <os>
+  arch: <arch>
+
+config search paths:
   user: <config-home>/unshackled/config.toml (missing)
-provider:
-  default: local
-  status: config loader pending; no secrets inspected
+  project: <workspace>/.unshackled.toml (present)
+
+providers:
+  local: credential UNSHACKLED_LOCAL_API_KEY not set
+  openai: credential OPENAI_API_KEY not set
+  anthropic: credential ANTHROPIC_API_KEY not set
+
 tools:
-  git: <tool-status>
-  rg: <tool-status>
-workspace trust: not recorded
+  git (git): available
+  ripgrep (rg): available
+
+workspace trust: unknown (evaluated when a session starts)

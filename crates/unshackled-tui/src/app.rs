@@ -45,6 +45,8 @@ pub enum SlashAction {
     SetMode(Mode),
     SetProfile(Profile),
     ToggleThinking,
+    Resume,
+    WaitResume,
     Quit,
     Unknown(String),
 }
@@ -60,6 +62,8 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
         "relaxed" => SlashAction::SetProfile(Profile::Relaxed),
         "bypass" => SlashAction::SetProfile(Profile::Bypass),
         "think" | "thinking" => SlashAction::ToggleThinking,
+        "resume" => SlashAction::Resume,
+        "wait-resume" | "wait_resume" => SlashAction::WaitResume,
         "quit" | "q" => SlashAction::Quit,
         other => SlashAction::Unknown(other.to_string()),
     })
@@ -147,6 +151,12 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
         SlashAction::SetMode(mode) => state.mode = mode,
         SlashAction::SetProfile(profile) => state.profile = profile,
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::Resume => state.apply(UiEvent::Notice(
+            "/resume is handled by the interactive host".to_string(),
+        )),
+        SlashAction::WaitResume => state.apply(UiEvent::Notice(
+            "/wait-resume is handled by the interactive host".to_string(),
+        )),
         SlashAction::Quit => state.should_quit = true,
         SlashAction::Unknown(_) => {}
     }

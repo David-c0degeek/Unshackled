@@ -7,10 +7,12 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use unshackled_config::{AutoFix, Cadence, CheckConfig, RuleSeverity};
 use unshackled_harness::{
-    decide_step, resume_one_step, CheckRunner, CompletionInputs, RuleEngine, SessionConfig,
-    SessionRuntime, StepAction, QUALITY_CHECK_TOOL,
+    decide_step, resume_one_step, resume_one_step_with_events, CheckRunner, CompletionInputs,
+    RuleEngine, RuntimeEvent, SessionConfig, SessionRuntime, StepAction, QUALITY_CHECK_TOOL,
 };
 use unshackled_llm::FakeProvider;
 use unshackled_recovery::{RecoveryBudget, RecoveryEngine};
@@ -99,6 +101,47 @@ async fn resume_completes_a_step_with_a_commit_and_progress_update() {
 
     // Two new commits: the step and the progress update.
     assert_eq!(commit_count(root), commits_before + 2);
+}
+
+#[tokio::test]
+async fn resume_with_events_forwards_runtime_progress() {
+    let dir = sample_repo();
+    let root = dir.path();
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call(
+                "c1",
+                "write_file",
+                json!({ "path": "hello.txt", "content": "hello" }),
+            )
+            .text("done"),
+    );
+    let mut runtime = runtime(root, provider);
+    let rules = RuleEngine::with_baseline(&Default::default());
+    let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
+    let cancel = CancellationToken::new();
+
+    let outcome =
+        resume_one_step_with_events(&mut runtime, root, &rules, None, &[], 3, &events, &cancel)
+            .await
+            .unwrap();
+
+    assert!(outcome.committed, "{:?}", outcome.blocked_reason);
+    let mut seen = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        seen.push(event);
+    }
+    assert!(
+        seen.iter().any(
+            |event| matches!(event, RuntimeEvent::ToolStarted { name, .. } if name == "write_file")
+        ),
+        "tool start event missing: {seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|event| matches!(event, RuntimeEvent::Text(text) if text == "done")),
+        "text event missing: {seen:?}"
+    );
 }
 
 fn commit_count(root: &Path) -> usize {
