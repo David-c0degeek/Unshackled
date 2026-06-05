@@ -140,6 +140,16 @@ fn render_plan(frame: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
+/// Color used for a given speaker in the transcript.
+fn speaker_style(speaker: &str) -> Style {
+    match speaker {
+        "you" => Style::default().fg(Color::Cyan),
+        "assistant" => Style::default().fg(Color::Green),
+        "tool" => Style::default().fg(Color::DarkGray),
+        _ => Style::default().fg(Color::Yellow),
+    }
+}
+
 fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
     let mut lines: Vec<Line> = Vec::new();
     for entry in &state.transcript {
@@ -148,6 +158,15 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
             .as_deref()
             .is_some_and(|q| !q.is_empty() && entry.text.contains(q));
         let prefix = if matched { ">" } else { " " };
+        let style = speaker_style(&entry.speaker);
+        if entry.speaker == "tool" {
+            lines.push(Line::from(vec![
+                Span::raw(prefix),
+                Span::styled("[tool] ", style.add_modifier(Modifier::ITALIC)),
+                Span::styled(entry.text.clone(), style),
+            ]));
+            continue;
+        }
         // Split on newlines so each line gets the speaker prefix (first line) or
         // a continuation indent (subsequent lines).  This makes `\n` in model
         // output actually render as line breaks instead of being swallowed.
@@ -156,18 +175,19 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{prefix}{}: ", entry.speaker),
-                        Style::default().add_modifier(Modifier::BOLD),
+                        style.add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(text_line.to_string()),
+                    Span::styled(text_line.to_string(), style),
                 ]));
             } else {
                 // Continuation lines get a two-space indent to visually align
                 // with the text after "speaker: ".
-                lines.push(Line::from(Span::raw(format!("  {text_line}"))));
+                lines.push(Line::from(Span::styled(format!("  {text_line}"), style)));
             }
         }
     }
     if !state.streaming.is_empty() {
+        let style = speaker_style("assistant");
         for (i, text_line) in state
             .streaming
             .trim_start_matches('\n')
@@ -176,26 +196,23 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
         {
             if i == 0 {
                 lines.push(Line::from(vec![
-                    Span::styled("assistant: ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw(text_line.to_string()),
+                    Span::styled("assistant: ", style.add_modifier(Modifier::BOLD)),
+                    Span::styled(text_line.to_string(), style),
                 ]));
             } else {
-                lines.push(Line::from(Span::raw(format!("  {text_line}"))));
+                lines.push(Line::from(Span::styled(format!("  {text_line}"), style)));
             }
         }
     }
-    let inner_width = area.width.saturating_sub(2).max(1) as usize;
-    let total_rows: usize = lines
-        .iter()
-        .map(|line| {
-            let width = line.width();
-            if width == 0 {
-                1
-            } else {
-                width.div_ceil(inner_width)
-            }
-        })
-        .sum();
+    let inner_width = area.width.saturating_sub(2).max(1);
+    // Count rows with ratatui's own word-wrapping (via `line_count`) so the
+    // scroll bounds match what the renderer actually draws. A character-based
+    // estimate diverges from `WordWrapper` and leaves the last rows unreachable.
+    // The measuring paragraph carries no block, so the returned count is the
+    // wrapped text rows alone (no border rows added).
+    let total_rows = Paragraph::new(Text::from(lines.clone()))
+        .wrap(Wrap { trim: false })
+        .line_count(inner_width);
     let visible_rows = area.height.saturating_sub(2).max(1) as usize;
     let max_scroll = total_rows.saturating_sub(visible_rows);
     let scroll_back = state.transcript_scroll.min(max_scroll);
@@ -204,6 +221,10 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
     let paragraph = Paragraph::new(Text::from(lines))
         .block(Block::bordered().title(title))
         .wrap(Wrap { trim: false });
+    // `scroll_rows` is always in range (0..=max_scroll). At the bottom it is
+    // exactly `max_scroll`, so the last `visible_rows` wrapped rows — including
+    // the final line — are shown. ratatui does not clamp the scroll offset, so
+    // an out-of-range value would clip or panic; we never pass one.
     let scroll = u16::try_from(scroll_rows).unwrap_or(u16::MAX);
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
 }
@@ -408,7 +429,7 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Header, Mode};
+    use crate::state::{Header, Mode, TranscriptLine};
 
     fn state_with_input(input: &str) -> AppState {
         let mut state = AppState::new(
@@ -453,6 +474,51 @@ mod tests {
         let mut state = state_with_input("abcd\nef");
         state.input_cursor = state.input.len();
         assert_eq!(input_cursor_position(&state, 3), (2, 2));
+    }
+
+    fn buffer_to_string(terminal: &ratatui::Terminal<ratatui::backend::TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let area = buf.area;
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn transcript_bottom_shows_the_last_line_when_tracking_bottom() {
+        // A transcript taller than its box, including a line long enough to
+        // word-wrap, so the rendered row count exceeds the viewport. When
+        // tracking the bottom (transcript_scroll == 0) the final line must be
+        // visible — it was clipped before because the bottom anchor relied on an
+        // over-large scroll offset and a character-based row estimate.
+        let mut state = state_with_input("");
+        for n in 1..=30 {
+            state.transcript.push(TranscriptLine {
+                speaker: "you".to_string(),
+                text: format!("history line number {n} with enough words to wrap across rows"),
+            });
+        }
+        state.transcript.push(TranscriptLine {
+            speaker: "assistant".to_string(),
+            text: "ZZ_LAST_LINE_ZZ".to_string(),
+        });
+        state.transcript_scroll = 0;
+
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 20))
+            .expect("test terminal");
+        terminal
+            .draw(|frame| render(frame, &state))
+            .expect("render succeeds");
+
+        assert!(
+            buffer_to_string(&terminal).contains("ZZ_LAST_LINE_ZZ"),
+            "the final transcript line should be visible at the bottom"
+        );
     }
 
     #[test]

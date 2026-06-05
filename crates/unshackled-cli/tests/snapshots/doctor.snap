@@ -1,0 +1,13 @@
+Unshackled 0.1.0
+platform: <platform>
+cwd: <workspace>
+config:
+  project: <workspace>/.unshackled.toml (present)
+  user: <config-home>/unshackled/config.toml (missing)
+provider:
+  default: local
+  status: config loader pending; no secrets inspected
+tools:
+  git: <tool-status>
+  rg: <tool-status>
+workspace trust: not recorded

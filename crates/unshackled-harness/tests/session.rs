@@ -166,6 +166,66 @@ async fn first_request_carries_the_agent_system_prompt_once() {
 }
 
 #[tokio::test]
+async fn compaction_summary_does_not_produce_two_system_messages() {
+    // A small context limit forces compaction once there are two prior
+    // exchanges; compaction injects a summary that must fold into the single
+    // leading system block rather than going out as a second system message.
+    let provider = Arc::new(FakeProvider::new().text("one").text("two").text("three"));
+    // The limit sits above (system prompt + one exchange + summary) but below
+    // (system prompt + all three exchanges), so by the third turn the oldest
+    // exchanges are dropped and a summary is injected.
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig {
+            context_token_limit: 900,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    let filler = "context ".repeat(250); // ~2000 chars per prompt
+    for label in ["first", "second", "third"] {
+        let prompt = format!("{label} {filler}");
+        let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+        assert_eq!(reason, StopReason::Done);
+    }
+
+    let requests = provider.requests();
+    let last = requests.last().expect("at least one request");
+    let system_messages: Vec<&str> = last
+        .messages
+        .iter()
+        .filter(|message| message.role == unshackled_core::Role::System)
+        .flat_map(|message| &message.content)
+        .filter_map(|block| match block {
+            unshackled_core::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // Exactly one leading system message, carrying both the agent prompt and the
+    // compaction summary.
+    assert_eq!(
+        last.messages
+            .iter()
+            .filter(|message| message.role == unshackled_core::Role::System)
+            .count(),
+        1,
+        "the request must not carry two consecutive system messages"
+    );
+    let combined = system_messages.join("\n");
+    assert!(
+        combined.contains("Available tools:"),
+        "system block keeps the agent prompt"
+    );
+    assert!(
+        combined.contains("Conversation summary for trimmed history"),
+        "system block folds in the compaction summary"
+    );
+}
+
+#[tokio::test]
 async fn aborts_a_degenerate_output_flood_early() {
     // A punctuation flood arriving as many small deltas (real streaming shape).
     let mut script: Vec<_> = (0..300)
@@ -355,6 +415,30 @@ async fn reasoning_is_emitted_as_metadata_distinct_from_text() {
     assert!(events
         .iter()
         .any(|e| matches!(e, RuntimeEvent::Text(t) if t == "the answer")));
+}
+
+#[tokio::test]
+async fn blank_reasoning_and_leading_answer_blank_lines_are_not_persisted() {
+    let provider = FakeProvider::new().script(vec![
+        Ok(ModelEvent::ReasoningDelta("\n\n".to_string())),
+        Ok(ModelEvent::TextDelta("\n\nThe answer".to_string())),
+        Ok(ModelEvent::Done),
+    ]);
+    let mut h = build(provider, &[], SessionConfig::default());
+
+    let reason = h.runtime.run_turn("hi", &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+
+    let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
+    let assistant = transcript
+        .iter()
+        .find(|message| message.role == unshackled_core::Role::Assistant)
+        .expect("assistant message is persisted");
+    assert_eq!(assistant.content.len(), 1);
+    assert!(matches!(
+        &assistant.content[0],
+        unshackled_core::ContentBlock::Text { text } if text == "The answer"
+    ));
 }
 
 #[tokio::test]
