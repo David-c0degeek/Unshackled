@@ -1,4 +1,4 @@
-﻿//! `localpilot print` — a non-interactive, single-prompt agent run.
+//! `localpilot print` — a non-interactive, single-prompt agent run.
 //!
 //! Print mode runs the shared session loop once, streams the answer to stdout,
 //! and makes no workspace mutations by default: it runs non-interactively, so the
@@ -7,14 +7,14 @@
 
 use std::io::Write;
 
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_config::{CliOverrides, ConfigPaths};
 use localpilot_harness::{RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
 use localpilot_llm::ProviderRegistry;
 use localpilot_recovery::{RecoveryBudget, RecoveryEngine};
 use localpilot_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use localpilot_store::Store;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 /// Map the `--permission` / `--bypass` flags to a permission profile. `--bypass`
 /// wins, and is never the default.

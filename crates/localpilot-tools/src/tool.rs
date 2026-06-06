@@ -1,8 +1,8 @@
-﻿//! The tool trait, execution context, and output type.
+//! The tool trait, execution context, and output type.
 
 use async_trait::async_trait;
-use serde_json::Value;
 use localpilot_sandbox::{Effect, Interactivity, Workspace};
+use serde_json::Value;
 
 use crate::error::ToolError;
 

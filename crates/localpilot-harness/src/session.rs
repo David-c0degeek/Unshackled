@@ -1,4 +1,4 @@
-﻿//! The agent-mode session runtime: the conversational loop both operating modes
+//! The agent-mode session runtime: the conversational loop both operating modes
 //! share. It streams provider events, routes tool calls through the permission
 //! engine, persists the transcript, and supports cancellation, loop limits, and
 //! context compaction.
@@ -8,8 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_config::redact::redact;
 use localpilot_config::CheckConfig;
 use localpilot_core::{ContentBlock, Message, Role, SessionId, TokenUsage, ToolCall, ToolUseId};
@@ -22,6 +20,8 @@ use localpilot_recovery::{
 use localpilot_sandbox::{Approver, Interactivity, PermissionEngine, Profile};
 use localpilot_store::Store;
 use localpilot_tools::{ToolContext, ToolRegistry};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 use crate::compaction::{compact_with_summary, estimate_tokens};
 use crate::quality::{CheckOutcome, CheckRunner};

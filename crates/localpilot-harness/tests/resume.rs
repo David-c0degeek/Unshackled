@@ -1,4 +1,4 @@
-﻿//! End-to-end `harness resume` tests: a small sample repo completes a step, and
+//! End-to-end `harness resume` tests: a small sample repo completes a step, and
 //! the act-on-findings loop retries, replans, or blocks on the quality gate.
 #![allow(clippy::unwrap_used)]
 
@@ -7,9 +7,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::json;
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_config::{AutoFix, Cadence, CheckConfig, RuleSeverity};
 use localpilot_harness::{
     decide_step, resume_one_step, resume_one_step_with_events, CheckRunner, CompletionInputs,
@@ -24,6 +21,9 @@ use localpilot_sandbox::{
 };
 use localpilot_store::Store;
 use localpilot_tools::ToolRegistry;
+use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 fn git(root: &Path, args: &[&str]) {
     let status = Command::new("git")

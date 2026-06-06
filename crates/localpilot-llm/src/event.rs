@@ -1,10 +1,10 @@
-﻿//! The internal streaming event model.
+//! The internal streaming event model.
 
 use std::pin::Pin;
 
 use futures::Stream;
-use serde::{Deserialize, Serialize};
 use localpilot_core::TokenUsage;
+use serde::{Deserialize, Serialize};
 
 use crate::error::ProviderError;
 

@@ -1,4 +1,4 @@
-﻿//! Golden-task evals: deterministic tasks that prove the agent actually completes
+//! Golden-task evals: deterministic tasks that prove the agent actually completes
 //! work, scored with a scorecard. Tasks are driven by the fake provider so they
 //! run offline; an optional live mode is gated behind `LOCALPILOT_LIVE_TESTS`.
 //!
@@ -10,9 +10,6 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use serde_json::{json, Value};
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_config::{load, AutoFix, Cadence, CheckConfig, CliOverrides, ConfigPaths};
 use localpilot_harness::{
     ratify_gate, resume_one_step, CheckStatus, ProposedCheck, RuleEngine, SessionConfig,
@@ -25,6 +22,9 @@ use localpilot_sandbox::{
 };
 use localpilot_store::Store;
 use localpilot_tools::ToolRegistry;
+use serde_json::{json, Value};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 /// One golden task: a setup, the provider's scripted behaviour, the plan step,
 /// and a check on the resulting repository.

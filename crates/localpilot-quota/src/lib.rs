@@ -1,4 +1,4 @@
-﻿//! Provider quota window tracking and wait/resume scheduling for LocalPilot.
+//! Provider quota window tracking and wait/resume scheduling for LocalPilot.
 //!
 //! Owns quota-window estimation from provider metadata, persistence of paused
 //! harness runs, and the wait/resume policy and safety gates. It coordinates
@@ -9,9 +9,9 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
 use localpilot_config::{QuotaAutoResume, QuotaConfig};
 use localpilot_llm::QuotaInfo;
+use serde::{Deserialize, Serialize};
 
 /// An estimated wait window before a paused run may be re-probed.
 #[derive(Debug, Clone, PartialEq, Eq)]

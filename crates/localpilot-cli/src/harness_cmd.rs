@@ -1,4 +1,4 @@
-﻿//! `localpilot init` and `localpilot harness status`.
+//! `localpilot init` and `localpilot harness status`.
 //!
 //! Status is read-only and must work without a model provider, so it never
 //! constructs the provider registry or touches the network.
@@ -8,8 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_config::{CliOverrides, Config, ConfigPaths};
 use localpilot_harness::{
     propose_gate, ratify_gate, resume_one_step_with_events, run_intake, run_plan,
@@ -23,6 +21,8 @@ use localpilot_sandbox::{
     Approver, Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace,
 };
 use localpilot_store::Store;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_CONFIG: &str = "[harness]\n\
 mode = \"agent\"\n\

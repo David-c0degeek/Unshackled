@@ -1,4 +1,4 @@
-﻿//! OpenAI-compatible provider adapter.
+//! OpenAI-compatible provider adapter.
 //!
 //! Implemented from the public OpenAI Chat Completions API documentation. One
 //! adapter serves both a local OpenAI-compatible server (Ollama, vLLM,
@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use indexmap::IndexMap;
-use serde_json::{json, Value};
 use localpilot_core::{ContentBlock, Message, Role, Secret, TokenUsage};
+use serde_json::{json, Value};
 
 use crate::error::{ProviderError, QuotaInfo};
 use crate::event::{split_inline_thinking, ModelEvent, ModelEventStream};

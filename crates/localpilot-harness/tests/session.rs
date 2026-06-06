@@ -1,12 +1,9 @@
-﻿//! Agent-mode session runtime integration tests, driven by the fake provider.
+//! Agent-mode session runtime integration tests, driven by the fake provider.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::json;
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use localpilot_core::{ContentBlock, Message};
 use localpilot_harness::{RuntimeEvent, SessionConfig, SessionRuntime, StopReason};
 use localpilot_llm::{FakeProvider, ModelEvent, ProviderError, QuotaInfo};
@@ -14,6 +11,9 @@ use localpilot_recovery::{RecoveryBudget, RecoveryEngine};
 use localpilot_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use localpilot_store::Store;
 use localpilot_tools::ToolRegistry;
+use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 struct Harness {
     _dir: tempfile::TempDir,

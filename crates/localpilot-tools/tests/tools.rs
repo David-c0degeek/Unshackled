@@ -1,10 +1,10 @@
-﻿//! Tool registry, permission, and builtin-tool behaviour tests.
+//! Tool registry, permission, and builtin-tool behaviour tests.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use serde_json::json;
 use localpilot_core::{ToolCall, ToolResult, ToolUseId};
 use localpilot_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use localpilot_tools::{ToolContext, ToolRegistry};
+use serde_json::json;
 
 fn workspace_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Workspace) {
     let dir = tempfile::tempdir().unwrap();

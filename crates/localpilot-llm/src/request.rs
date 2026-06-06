@@ -1,8 +1,8 @@
-﻿//! The internal request model.
+//! The internal request model.
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 use localpilot_core::Message;
+use serde::{Deserialize, Serialize};
 
 /// A provider-neutral request. Provider-specific tuning lives under
 /// [`ModelRequest::options`], namespaced, reserving room for future first-class

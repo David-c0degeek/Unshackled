@@ -1,17 +1,17 @@
-﻿//! MCP tools go through the same permission engine and redaction as builtin
+//! MCP tools go through the same permission engine and redaction as builtin
 //! tools: an MCP write is denied exactly like a builtin write, and MCP output is
 //! redacted.
 #![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
 
-use serde_json::json;
 use localpilot_core::{ToolCall, ToolUseId};
 use localpilot_mcp::{McpTool, McpToolDescriptor, ScriptedTransport};
 use localpilot_sandbox::{
     Effect, Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace,
 };
 use localpilot_tools::{ToolContext, ToolRegistry};
+use serde_json::json;
 
 fn descriptor(name: &str) -> McpToolDescriptor {
     McpToolDescriptor {

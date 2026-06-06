@@ -1,4 +1,4 @@
-﻿//! Configuration precedence, redaction, and diagnostics tests.
+//! Configuration precedence, redaction, and diagnostics tests.
 //!
 //! These cover the required MVP config tests: default loads, project overrides
 //! user, env overrides project, CLI overrides env, and secrets stay out of debug
@@ -9,8 +9,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use proptest::prelude::*;
 use localpilot_config::{load, AutoFix, Cadence, CliOverrides, ConfigPaths};
+use proptest::prelude::*;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 

@@ -1,4 +1,4 @@
-﻿//! Anthropic Messages API provider adapter.
+//! Anthropic Messages API provider adapter.
 //!
 //! Implemented from the public Anthropic Messages API documentation. It speaks
 //! the documented official endpoint only; no private or undocumented behaviour
@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use indexmap::IndexMap;
-use serde_json::{json, Value};
 use localpilot_core::{ContentBlock, Message, Role, Secret, TokenUsage};
+use serde_json::{json, Value};
 
 use crate::error::{ProviderError, QuotaInfo};
 use crate::event::{split_inline_thinking, ModelEvent, ModelEventStream};
