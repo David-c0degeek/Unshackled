@@ -1,4 +1,4 @@
-﻿```
+```
 ╔══════╗ ╔══╗		██╗      ██████╗  ██████╗ █████╗ ██╗     ██████╗ ██╗██╗      ██████╗ ████████╗
 ║ >_ █ ║ ║██║║		██║     ██╔═══██╗██╔════╝██╔══██╗██║     ██╔══██╗██║██║     ██╔═══██╗╚══██╔══╝
 ╚══╦═══╝ ║██║║		██║     ██║   ██║██║     ███████║██║     ██████╔╝██║██║     ██║   ██║   ██║   
@@ -9,8 +9,8 @@
 # LocalPilot
 
 [![install](https://img.shields.io/badge/install-one--liner-555?style=flat-square)](#getting-started)
-[![stars](https://img.shields.io/github/stars/David-c0degeek/LocalPilot?style=flat-square&label=stars&color=007ec6)](https://github.com/David-c0degeek/LocalPilot/stargazers)
-[![issues](https://img.shields.io/github/issues/David-c0degeek/LocalPilot?style=flat-square&label=issues&color=4c1)](https://github.com/David-c0degeek/LocalPilot/issues)
+[![stars](https://img.shields.io/github/stars/C0deGeek-dev/LocalPilot?style=flat-square&label=stars&color=007ec6)](https://github.com/C0deGeek-dev/LocalPilot/stargazers)
+[![issues](https://img.shields.io/github/issues/C0deGeek-dev/LocalPilot?style=flat-square&label=issues&color=4c1)](https://github.com/C0deGeek-dev/LocalPilot/issues)
 [![agent loop](https://img.shields.io/badge/agent%20loop-alpha-orange?style=flat-square)](#commands)
 [![harness](https://img.shields.io/badge/harness-mode-555?style=flat-square)](#commands)
 [![rules](https://img.shields.io/badge/rules-9%20gates-4c1?style=flat-square)](docs/06-harness-spec.md)
@@ -18,20 +18,20 @@
 LocalPilot is a Rust-native, provider-neutral coding-agent harness.
 
 Maintained by C0deGeek.dev (David, Bram).
-Repository: <https://github.com/David-c0degeek/LocalPilot>
+Repository: <https://github.com/C0deGeek-dev/LocalPilot>
 Runs on Windows, Linux, and macOS — all first-class, tier-1 platforms.
 
 ## LocalX Ecosystem
 
-- [LocalStack](https://github.com/David-c0degeek/LocalStack) is the umbrella
+- [LocalStack](https://github.com/C0deGeek-dev/LocalStack) is the umbrella
   ecosystem for the LocalX tools.
-- [LocalBox](https://github.com/David-c0degeek/LocalBox) is the model runtime
+- [LocalBox](https://github.com/C0deGeek-dev/LocalBox) is the model runtime
   and launcher for local GGUF models.
-- [LocalMind](https://github.com/David-c0degeek/LocalMind) is the local-first
+- [LocalMind](https://github.com/C0deGeek-dev/LocalMind) is the local-first
   memory and RAG layer embedded by LocalPilot.
-- [LocalBench](https://github.com/David-c0degeek/LocalBench) is the benchmarking
+- [LocalBench](https://github.com/C0deGeek-dev/LocalBench) is the benchmarking
   and evaluation companion for local model/runtime choices.
-- [LocalPilot](https://github.com/David-c0degeek/LocalPilot) is this local CLI
+- [LocalPilot](https://github.com/C0deGeek-dev/LocalPilot) is this local CLI
   coding agent.
 
 It is not a fork, clone, port, or redistribution of any vendor CLI. The project
@@ -60,7 +60,7 @@ It contains no implementation copied from any closed-source or leaked codebase.
 Clone with submodules (the LocalMind learning engine is vendored as one):
 
 ```sh
-git clone --recurse-submodules https://github.com/David-c0degeek/LocalPilot.git
+git clone --recurse-submodules https://github.com/C0deGeek-dev/LocalPilot.git
 # or, in an existing clone:
 git submodule update --init --recursive
 ```

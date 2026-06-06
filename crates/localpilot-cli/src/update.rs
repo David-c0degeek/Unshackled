@@ -1,4 +1,4 @@
-﻿//! Self-update: check the project repository for a newer release tag and, on the
+//! Self-update: check the project repository for a newer release tag and, on the
 //! user's confirmation, reinstall from source with the same feature set.
 
 use std::io::Write;
@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use localpilot_store::Store;
 
-const REPO_URL: &str = "https://github.com/David-c0degeek/LocalPilot.git";
-const TAGS_API: &str = "https://api.github.com/repos/David-c0degeek/LocalPilot/tags";
+const REPO_URL: &str = "https://github.com/C0deGeek-dev/LocalPilot.git";
+const TAGS_API: &str = "https://api.github.com/repos/C0deGeek-dev/LocalPilot/tags";
 const CACHE_KEY: &str = "update-check.json";
 const CHECK_INTERVAL_SECS: u64 = 86_400;
 
