@@ -1,14 +1,14 @@
-﻿//! The builtin tools.
+//! The builtin tools.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use localpilot_config::redact::contains_secret;
+use localpilot_sandbox::{classify, is_secret_like, CommandClass, Effect};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use localpilot_config::redact::contains_secret;
-use localpilot_sandbox::{classify, is_secret_like, CommandClass, Effect};
 
 use crate::error::ToolError;
 use crate::tool::{parse_input, schema_for, Tool, ToolContext, ToolOutput};

@@ -1,4 +1,4 @@
-﻿//! `localpilot chat` — the interactive terminal REPL.
+//! `localpilot chat` — the interactive terminal REPL.
 //!
 //! This is the terminal driver: it maps real crossterm key events into the
 //! backend-agnostic `localpilot-tui` core, runs a session turn per submission,
@@ -17,10 +17,6 @@ use crossterm::event::{
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
 use localpilot_config::{CliOverrides, ConfigPaths};
 use localpilot_harness::{ModelHealth, RuntimeEvent, SessionConfig, SessionRuntime};
 use localpilot_llm::ProviderRegistry;
@@ -33,6 +29,10 @@ use localpilot_tui::{
     handle_input, parse_slash, render, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
     PlanItem, Profile as UiProfile, SlashAction, TrustPrompt, UiEvent,
 };
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
+use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit};
 

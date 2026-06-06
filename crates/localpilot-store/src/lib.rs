@@ -1,4 +1,4 @@
-﻿//! Session persistence for LocalPilot.
+//! Session persistence for LocalPilot.
 //!
 //! The store owns the project-local `.localpilot/` directory: transcripts (one
 //! JSON message per line), a session index, a file-backed cache, tool-output
@@ -15,9 +15,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
 use localpilot_config::redact::redact;
 use localpilot_core::{Message, SessionId};
+use serde::{Deserialize, Serialize};
 
 pub use atomic::atomic_write;
 pub use error::StoreError;

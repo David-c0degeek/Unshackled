@@ -1,9 +1,9 @@
-﻿//! The tool registry and permission-gated dispatch.
+//! The tool registry and permission-gated dispatch.
 
-use serde_json::Value;
 use localpilot_config::redact::redact;
 use localpilot_core::{ToolCall, ToolResult};
 use localpilot_sandbox::{Approver, Decision, PermissionEngine, PermissionRequest};
+use serde_json::Value;
 
 use crate::builtins::{
     EditFile, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore, GitStatus, ListFiles,

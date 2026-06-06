@@ -1,12 +1,12 @@
-﻿//! The MCP protocol client and the `Tool` adapter.
+//! The MCP protocol client and the `Tool` adapter.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use localpilot_sandbox::Effect;
 use localpilot_tools::{Tool, ToolContext, ToolError, ToolOutput};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::error::McpError;
 use crate::transport::Transport;

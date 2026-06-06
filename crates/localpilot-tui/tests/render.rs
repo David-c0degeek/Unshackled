@@ -1,13 +1,13 @@
-﻿//! TUI render snapshots and event-loop behaviour.
+//! TUI render snapshots and event-loop behaviour.
 #![allow(clippy::unwrap_used)]
 
-use ratatui::backend::{Backend, TestBackend};
-use ratatui::buffer::Buffer;
-use ratatui::Terminal;
 use localpilot_tui::{
     handle_input, parse_slash, render, run, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
     Picker, Profile, SlashAction, ThinkingPanel, TranscriptLine, TrustPrompt, UiEvent,
 };
+use ratatui::backend::{Backend, TestBackend};
+use ratatui::buffer::Buffer;
+use ratatui::Terminal;
 
 fn header() -> Header {
     Header {
