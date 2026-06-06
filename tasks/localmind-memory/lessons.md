@@ -1,8 +1,8 @@
-# Lessons
+﻿# Lessons
 
 - LocalMind needs memory-management APIs at the store boundary; host adapters
   should not manipulate LocalMind database tables directly.
-- LocalMind's lockfile can select newer transitive crates than the Unshackled
+- LocalMind's lockfile can select newer transitive crates than the LocalPilot
   MSRV supports; keep the vendored lockfile aligned with Cargo 1.82-compatible
   dependency versions when adding store APIs.
 - Context injection lookups must be read-only. A missing LocalMind project

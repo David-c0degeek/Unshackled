@@ -1,4 +1,4 @@
-# Lessons — durable engineering notes
+﻿# Lessons — durable engineering notes
 
 Permanent home for lessons worth keeping past any one work cycle. Plan-agnostic:
 no disposable IDs, just the gotcha and how to handle it. Append as you learn.
@@ -43,8 +43,8 @@ TOML through `figment` so there is no direct `toml` dependency to keep in sync.
 
 The GNU toolchain on Windows is sensitive to native-dependency build shape.
 Avoid dev-only feature unification when a member crate is also a dependency of
-another member: `unshackled-config` enabling `figment/test` made
-`cargo test --workspace` build a different `unshackled-harness` test binary that
+another member: `localpilot-config` enabling `figment/test` made
+`cargo test --workspace` build a different `localpilot-harness` test binary that
 crashed (`0xc0000005`) before test listing. Replacing `figment::Jail` with a
 small local environment-isolation helper removed that feature edge and made
 `cargo test --workspace` pass locally again.

@@ -1,4 +1,4 @@
-# 00 — Tooling Research And Readiness
+﻿# 00 — Tooling Research And Readiness
 
 ## Goal
 
@@ -17,10 +17,10 @@ memory replacement.
 - [x] Captain Hindsight review recorded
 - [x] Verdict is `CLOSE`
 
-Keep: The dependency direction is clear: Unshackled adapts LocalMind, LocalMind
+Keep: The dependency direction is clear: LocalPilot adapts LocalMind, LocalMind
 does not depend back.
 Fix before closing: None for tooling readiness.
-Record: LocalMind needs first-class list/delete APIs so Unshackled does not
+Record: LocalMind needs first-class list/delete APIs so LocalPilot does not
 recreate persistence behavior.
 Risk: Full workspace verification still pending.
 Verdict: CLOSE

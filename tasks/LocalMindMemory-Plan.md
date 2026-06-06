@@ -1,6 +1,6 @@
-# LocalMindMemory-Plan.md
+﻿# LocalMindMemory-Plan.md
 
-> Disposable build-process plan for replacing the legacy Unshackled memory crate
+> Disposable build-process plan for replacing the legacy LocalPilot memory crate
 > with the bundled LocalMind implementation. Shipped code, tests, comments, and
 > commit metadata stay plan-agnostic.
 
@@ -17,9 +17,9 @@
 
 ## 1. Subject
 
-Replace Unshackled's standalone flat memory crate with the LocalMind-backed
+Replace LocalPilot's standalone flat memory crate with the LocalMind-backed
 learning and memory implementation. In scope: CLI memory routing, LocalMind
-store APIs needed by Unshackled, workspace/docs cleanup, and verification. Out
+store APIs needed by LocalPilot, workspace/docs cleanup, and verification. Out
 of scope: new TUI review screens, graph database expansion, or autonomous
 memory writes.
 
@@ -31,7 +31,7 @@ memory writes.
 | `docs/localmind-integration.md` | Ownership boundary and intended LocalMind host integration. |
 | `docs/02-architecture.md` | Crate ownership model to update after crate removal. |
 | `docs/13-rust-best-practices.md` | Rust quality expectations. |
-| `external/localmind` | First-party LocalMind engine consumed by Unshackled. |
+| `external/localmind` | First-party LocalMind engine consumed by LocalPilot. |
 
 ## 3. Subject file index
 
@@ -56,7 +56,7 @@ memory writes.
 ## 6. Cross-cutting principles
 
 1. Keep LocalMind as the single durable memory implementation.
-2. Keep LocalMind host-neutral; Unshackled owns only adapter and CLI behavior.
+2. Keep LocalMind host-neutral; LocalPilot owns only adapter and CLI behavior.
 3. Memory writes remain local, inspectable, reviewed, and auditable.
 4. Update docs and metadata so no removed crate is advertised.
 5. Preserve clean-room provenance; no proprietary source or prompt copying.
@@ -66,13 +66,13 @@ memory writes.
 - [x] Subject 01 completed
 - [x] `cargo fmt --check` clean
 - [x] `cargo test -p localmind-store --manifest-path external/localmind/Cargo.toml` passes
-- [x] `cargo test -p unshackled-localmind -p unshackled` passes
+- [x] `cargo test -p localpilot-localmind -p localpilot` passes
 - [x] `cargo check --workspace` clean
-- [x] Stale `unshackled-memory` references removed outside deletion history
+- [x] Stale `localpilot-memory` references removed outside deletion history
 - [x] Hindsight checkpoint recorded with verdict `CLOSE`
 
 ## 8. Acceptance / sign-off
 
 | Date | Reviewer | Result | Notes |
 |---|---|---|---|
-| 2026-06-05 | Codex | PASS | LocalMind is now the only durable memory implementation in Unshackled; full workspace verification passed. |
+| 2026-06-05 | Codex | PASS | LocalMind is now the only durable memory implementation in LocalPilot; full workspace verification passed. |
