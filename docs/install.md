@@ -1,4 +1,4 @@
-﻿# Installing LocalPilot (alpha)
+# Installing LocalPilot (alpha)
 
 LocalPilot is a Rust-native, provider-neutral coding-agent harness for Windows,
 Linux, and macOS (all tier-1).
@@ -13,7 +13,7 @@ Linux, and macOS (all tier-1).
 Clone with submodules (or initialize them after cloning):
 
 ```sh
-git clone --recurse-submodules https://github.com/David-c0degeek/LocalPilot.git
+git clone --recurse-submodules https://github.com/C0deGeek-dev/LocalPilot.git
 # or, in an existing clone:
 git submodule update --init --recursive
 ```

@@ -1,4 +1,4 @@
-﻿[workspace]
+[workspace]
 members = [
     "crates/localpilot-cli",
     "crates/localpilot-core",
@@ -25,8 +25,8 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 authors = ["David <David@c0degeek.dev>", "Bram (C0deGeek.dev)"]
-repository = "https://github.com/David-c0degeek/LocalPilot"
-homepage = "https://github.com/David-c0degeek/LocalPilot"
+repository = "https://github.com/C0deGeek-dev/LocalPilot"
+homepage = "https://github.com/C0deGeek-dev/LocalPilot"
 rust-version = "1.82"
 
 [workspace.dependencies]

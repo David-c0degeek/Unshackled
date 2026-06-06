@@ -1,4 +1,4 @@
-﻿# Product Specification
+# Product Specification
 
 ## Product Definition
 
@@ -18,7 +18,7 @@ The product is not a general chatbot. It is an engineering workflow controller.
 ## Maintainers
 
 LocalPilot is developed and maintained by C0deGeek.dev (David, Bram). The
-canonical repository is <https://github.com/David-c0degeek/LocalPilot>.
+canonical repository is <https://github.com/C0deGeek-dev/LocalPilot>.
 
 ## Supported Platforms
 
