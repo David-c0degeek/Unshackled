@@ -82,9 +82,10 @@ fn input_box_height(state: &AppState, area: Rect) -> u16 {
 
 fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
     let h = &state.header;
+    let ver = h.version.strip_prefix('v').unwrap_or(&h.version);
     let mut text = format!(
         "LocalPilot v{} | {}/{} | ws:{} | session:{}",
-        h.version, h.provider, h.model, h.workspace, h.session_id
+        ver, h.provider, h.model, h.workspace, h.session_id
     );
     if let Some(update) = &h.update {
         text.push_str(&format!("  ·  update available: {update}"));
