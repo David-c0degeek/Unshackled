@@ -22,8 +22,6 @@ mod memory_cmd;
 mod repl;
 mod session_cmd;
 #[cfg(feature = "tui")]
-mod terminal_mouse;
-#[cfg(feature = "tui")]
 mod trust;
 mod update;
 

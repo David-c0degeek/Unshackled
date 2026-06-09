@@ -33,8 +33,7 @@ use ratatui::Terminal;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit};
-use crate::terminal_mouse::write_mouse_tracking_off;
+use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit, write_mouse_tracking_off};
 
 /// A pending approval handed from the [`TuiApprover`] (running inside the turn)
 /// to the event loop, which raises the modal and replies with the user's answer.
