@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "localpilot-tui"
 version = "0.1.0"
 edition.workspace = true
@@ -14,6 +14,7 @@ workspace = true
 # widget live in the CLI's terminal driver, keeping this crate's tests free of
 # the terminal-init code that crashes the harness on some local toolchains.
 ratatui = { workspace = true, default-features = false }
+tachyonfx = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

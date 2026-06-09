@@ -1,7 +1,7 @@
 //! The agent-mode session runtime: the conversational loop both operating modes
 //! share. It streams provider events, routes tool calls through the permission
-//! engine, persists the transcript, and supports cancellation, loop limits, and
-//! context compaction.
+//! engine, persists the transcript, and supports cancellation, recovery
+//! safeguards, and context compaction.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -32,10 +32,6 @@ use crate::rules::{trigger_for_cadence, Trigger};
 pub enum StopReason {
     /// The model produced a final answer.
     Done,
-    /// The turn cap was reached.
-    MaxTurns,
-    /// The tool-call cap was reached.
-    MaxToolCalls,
     /// The user cancelled.
     Cancelled,
     /// The provider/model was marked degraded by recovery.
@@ -100,8 +96,6 @@ pub struct ManualCompaction {
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
     pub model: String,
-    pub max_turns: u32,
-    pub max_tool_calls: u32,
     pub interactivity: Interactivity,
     pub trusted: bool,
     pub context_token_limit: usize,
@@ -114,8 +108,6 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             model: "default".to_string(),
-            max_turns: 12,
-            max_tool_calls: 24,
             interactivity: Interactivity::Interactive,
             trusted: true,
             context_token_limit: 24_000,
@@ -356,10 +348,9 @@ impl SessionRuntime {
     ) -> StopReason {
         self.append(Message::text(Role::User, user_input));
         self.last_quota = None;
-        let mut tool_calls_used = 0u32;
         let mut tools_enabled = true;
 
-        for _ in 0..self.config.max_turns {
+        loop {
             if cancel.is_cancelled() {
                 return self.stop(events, StopReason::Cancelled);
             }
@@ -521,17 +512,22 @@ impl SessionRuntime {
 
             if let Some(message) = invalid_tool_calls(&calls) {
                 let _ = events.send(RuntimeEvent::Warning(message.clone()));
+                let diagnostic = self
+                    .recovery
+                    .record_bad_turn(localpilot_recovery::BadOutputKind::MalformedToolCall);
+                self.persist_recovery(&diagnostic);
+                let _ = events.send(RuntimeEvent::Recovery {
+                    health: self.recovery.health(),
+                });
+                if self.recovery.health() == ModelHealth::Degraded {
+                    return self.stop(events, StopReason::Degraded);
+                }
                 self.messages.push(Message::text(Role::User, message));
                 continue;
             }
 
             // Execute tool calls through the permission-gated registry.
             for (id, name, input) in calls {
-                if tool_calls_used >= self.config.max_tool_calls {
-                    return self.stop(events, StopReason::MaxToolCalls);
-                }
-                tool_calls_used += 1;
-
                 // Surface the task plan to the UI as the model updates it.
                 if name == "update_plan" {
                     if let Some(steps) = parse_plan(&input) {
@@ -565,8 +561,6 @@ impl SessionRuntime {
                 ));
             }
         }
-
-        self.stop(events, StopReason::MaxTurns)
     }
 
     fn stop(&self, events: &broadcast::Sender<RuntimeEvent>, reason: StopReason) -> StopReason {

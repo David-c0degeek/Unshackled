@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::io::{self, Stdout};
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -214,8 +214,9 @@ async fn event_loop(
     approval_rx: &mut mpsc::UnboundedReceiver<ApprovalCall>,
     host: CommandHost<'_>,
 ) -> anyhow::Result<()> {
+    let animation_started = Instant::now();
     loop {
-        terminal.draw(|frame| render(frame, state))?;
+        draw_ui(terminal, state, animation_started)?;
         if state.should_quit {
             return Ok(());
         }
@@ -455,6 +456,7 @@ where
 
     // The reply channel for an approval the user has not yet answered.
     let mut pending: Option<oneshot::Sender<bool>> = None;
+    let animation_started = Instant::now();
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -472,7 +474,7 @@ where
                     }
                     pending = resolve_event(state, pending, event::read()?, cancel);
                 }
-                terminal.draw(|frame| render(frame, state))?;
+                draw_ui(terminal, state, animation_started)?;
             }
             result = &mut operation => {
                 // Drain any events still buffered so a fast response is not lost
@@ -510,8 +512,17 @@ where
             }
         }
     };
-    terminal.draw(|frame| render(frame, state))?;
+    draw_ui(terminal, state, animation_started)?;
     Ok(value)
+}
+
+fn draw_ui(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    state: &AppState,
+    animation_started: Instant,
+) -> anyhow::Result<()> {
+    terminal.draw(|frame| render(frame, state, animation_started.elapsed()))?;
+    Ok(())
 }
 
 /// Apply a terminal event received mid-turn. Approval dialogs capture their

@@ -54,7 +54,9 @@ fn buffer_string(buffer: &Buffer) -> String {
 
 fn render_string(state: &AppState, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    terminal.draw(|frame| render(frame, state)).unwrap();
+    terminal
+        .draw(|frame| render(frame, state, std::time::Duration::ZERO))
+        .unwrap();
     buffer_string(terminal.backend().buffer())
 }
 
@@ -301,7 +303,9 @@ fn input_cursor_is_visible_at_the_edit_position() {
     state.input = "abcd".to_string();
     state.input_cursor = 2;
     let mut terminal = Terminal::new(TestBackend::new(90, 18)).unwrap();
-    terminal.draw(|frame| render(frame, &state)).unwrap();
+    terminal
+        .draw(|frame| render(frame, &state, std::time::Duration::ZERO))
+        .unwrap();
 
     // Input box starts at row 13 in this layout; its content starts at x=1,y=14.
     assert_eq!(

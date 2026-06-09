@@ -1,12 +1,15 @@
-﻿//! Rendering. A single [`render`] draws the whole UI from [`AppState`]; it is
+//! Rendering. A single [`render`] draws the whole UI from [`AppState`]; it is
 //! pure with respect to the state, so it snapshot-tests cleanly with a
 //! `TestBackend`.
+
+use std::time::Duration;
 
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use ratatui::Frame;
+use tachyonfx::{fx, Interpolation, Shader};
 
 use crate::state::{AppState, ApprovalRequest, Picker, Profile, TrustPrompt};
 
@@ -17,7 +20,7 @@ const NARROW_WIDTH: u16 = 80;
 const MAX_INPUT_TEXT_ROWS: u16 = 10;
 
 /// Draw the entire UI for the current state.
-pub fn render(frame: &mut Frame, state: &AppState) {
+pub fn render(frame: &mut Frame, state: &AppState, animation_elapsed: Duration) {
     let area = frame.area();
     let narrow = area.width < NARROW_WIDTH;
 
@@ -34,6 +37,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     render_body(frame, rows[1], state, narrow);
     render_input(frame, rows[2], state);
     render_footer(frame, rows[3], state);
+
+    let mut effect = fx::fade_from_fg(Color::DarkGray, (800, Interpolation::Linear));
+    effect.process(animation_elapsed.into(), frame.buffer_mut(), rows[0]);
 
     if let Some(approval) = &state.approval {
         render_approval(frame, area, approval, state);
@@ -91,7 +97,12 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
         text.push_str(&format!("  ·  update available: {update}"));
     }
     frame.render_widget(
-        Paragraph::new(text).block(Block::bordered().title("LocalPilot")),
+        Paragraph::new(text).block(
+            Block::bordered()
+                .border_type(BorderType::Rounded)
+                .title("LocalPilot")
+                .padding(Padding::left(1)),
+        ),
         area,
     );
 }
@@ -136,7 +147,12 @@ fn render_plan(frame: &mut Frame, area: Rect, state: &AppState) {
     let done = state.plan.iter().filter(|i| i.status == "done").count();
     let title = format!("plan ({done}/{})", state.plan.len());
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).block(Block::bordered().title(title)),
+        Paragraph::new(Text::from(lines)).block(
+            Block::bordered()
+                .border_type(BorderType::Rounded)
+                .title(title)
+                .padding(Padding::left(1)),
+        ),
         area,
     );
 }
@@ -220,7 +236,12 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
     let scroll_rows = max_scroll.saturating_sub(scroll_back);
     let title = transcript_title(state, total_rows, visible_rows, scroll_rows, max_scroll);
     let paragraph = Paragraph::new(Text::from(lines))
-        .block(Block::bordered().title(title))
+        .block(
+            Block::bordered()
+                .border_type(BorderType::Rounded)
+                .title(title)
+                .padding(Padding::left(1)),
+        )
         .wrap(Wrap { trim: false });
     // `scroll_rows` is always in range (0..=max_scroll). At the bottom it is
     // exactly `max_scroll`, so the last `visible_rows` wrapped rows — including
@@ -259,7 +280,12 @@ fn transcript_title(
 fn render_thinking(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(
         Paragraph::new(state.thinking.text.clone())
-            .block(Block::bordered().title("thinking"))
+            .block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .title("thinking")
+                    .padding(Padding::left(1)),
+            )
             .style(Style::default().fg(Color::DarkGray))
             .wrap(Wrap { trim: false }),
         area,
@@ -284,7 +310,12 @@ fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
     let scroll = cursor_row.saturating_add(1).saturating_sub(visible_rows);
     frame.render_widget(
         Paragraph::new(state.input.clone())
-            .block(Block::bordered().title(title))
+            .block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .title(title)
+                    .padding(Padding::left(1)),
+            )
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         area,
@@ -513,13 +544,31 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 20))
             .expect("test terminal");
         terminal
-            .draw(|frame| render(frame, &state))
+            .draw(|frame| render(frame, &state, Duration::ZERO))
             .expect("render succeeds");
 
         assert!(
             buffer_to_string(&terminal).contains("ZZ_LAST_LINE_ZZ"),
             "the final transcript line should be visible at the bottom"
         );
+    }
+
+    #[test]
+    fn header_fades_from_dark_to_rendered_foreground() {
+        let state = state_with_input("");
+        let mut initial = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+            .expect("test terminal");
+        initial
+            .draw(|frame| render(frame, &state, Duration::ZERO))
+            .expect("render succeeds");
+        assert_eq!(initial.backend().buffer()[(1, 0)].fg, Color::DarkGray);
+
+        let mut finished = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+            .expect("test terminal");
+        finished
+            .draw(|frame| render(frame, &state, Duration::from_millis(800)))
+            .expect("render succeeds");
+        assert_ne!(finished.backend().buffer()[(1, 0)].fg, Color::DarkGray);
     }
 
     #[test]
@@ -530,7 +579,7 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
             .expect("test terminal");
         terminal
-            .draw(|frame| render(frame, &state))
+            .draw(|frame| render(frame, &state, Duration::ZERO))
             .expect("render succeeds");
         assert!(terminal.get_cursor_position().is_ok());
     }

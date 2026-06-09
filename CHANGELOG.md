@@ -100,9 +100,9 @@ stability policy is in [docs/configuration.md](docs/configuration.md).
   `run_shell`, `git_status`, `git_commit`) with generated schemas, atomic writes,
   and output redaction on every profile.
 - Added the shared agent-mode session runtime (cancellable streaming loop, tool
-  execution, transcript persistence, context compaction, loop limits) with
-  bad-output detection and a budgeted recovery ladder, plus `localpilot print`
-  and the `chat` REPL behind the opt-in `tui` feature.
+  execution, transcript persistence, and context compaction) with bad-output
+  detection and a budgeted recovery ladder, plus `localpilot print` and the
+  `chat` REPL behind the opt-in `tui` feature.
 - Added the harness core: lossless `brief.md` / `PROGRESS.md` documents; the
   `init`, `harness status`, `intake`, `plan`, `feature`, and `resume` commands;
   original intake/planner prompts; a deterministic rule engine with protected

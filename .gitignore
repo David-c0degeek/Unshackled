@@ -16,3 +16,4 @@
 
 # JetBrains IDE project config (Rider/CLion/IntelliJ)
 /.idea/
+.unshackled/

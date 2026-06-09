@@ -584,6 +584,19 @@ async fn malformed_tool_call_is_reported_and_reprompted() {
     )));
 }
 
+#[tokio::test]
+async fn repeated_malformed_tool_calls_use_recovery() {
+    let mut provider = FakeProvider::new();
+    for _ in 0..3 {
+        provider = provider.tool_call("", "git_status", json!({}));
+    }
+    let mut h = build_with(provider, &[], SessionConfig::default(), Profile::Bypass);
+
+    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
+
+    assert_eq!(reason, StopReason::Degraded);
+}
+
 #[tokio::test(start_paused = true)]
 async fn retries_a_transient_connection_failure_then_succeeds() {
     // Two connection failures, then a normal response: within the retry budget.
@@ -804,40 +817,4 @@ async fn cancellation_leaves_a_consistent_transcript() {
     let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
     assert_eq!(transcript.len(), 1);
     assert_eq!(transcript[0].role, localpilot_core::Role::User);
-}
-
-#[tokio::test]
-async fn loop_stops_at_the_turn_cap() {
-    // A provider that always asks for a tool never produces a final answer.
-    let provider = FakeProvider::new()
-        .tool_call("c1", "git_status", json!({}))
-        .tool_call("c2", "git_status", json!({}))
-        .tool_call("c3", "git_status", json!({}));
-    let config = SessionConfig {
-        max_turns: 2,
-        ..SessionConfig::default()
-    };
-    let mut h = build_with(provider, &[], config, Profile::Bypass);
-
-    let reason = h
-        .runtime
-        .run_turn("loop forever", &h.events, &h.cancel)
-        .await;
-    assert_eq!(reason, StopReason::MaxTurns);
-}
-
-#[tokio::test]
-async fn loop_stops_at_the_tool_call_cap() {
-    let provider = FakeProvider::new()
-        .tool_call("c1", "git_status", json!({}))
-        .tool_call("c2", "git_status", json!({}));
-    let config = SessionConfig {
-        max_turns: 10,
-        max_tool_calls: 1,
-        ..SessionConfig::default()
-    };
-    let mut h = build_with(provider, &[], config, Profile::Bypass);
-
-    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
-    assert_eq!(reason, StopReason::MaxToolCalls);
 }

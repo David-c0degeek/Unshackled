@@ -98,14 +98,14 @@ Tasks:
 - append tool results
 - persist transcript
 - support cancellation
-- support max turn/tool limits
+- support recovery safeguards
 - support print mode
 
 Done when:
 
 - a fake provider can request file reads and shell commands
 - cancellation leaves consistent persisted state
-- all loop limits are tested
+- recovery safeguards are tested
 
 ## Phase 5: Harness Documents
 

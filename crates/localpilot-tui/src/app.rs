@@ -4,6 +4,8 @@
 //! under a scripted source in tests; the real CLI feeds it crossterm events and a
 //! mapped runtime-event stream.
 
+use std::time::{Duration, Instant};
+
 use ratatui::backend::Backend;
 use ratatui::Terminal;
 
@@ -225,10 +227,11 @@ pub fn run<B: Backend>(
     state: &mut AppState,
     inputs: impl IntoIterator<Item = AppInput>,
 ) -> std::io::Result<()> {
-    terminal.draw(|frame| render(frame, state))?;
+    let started = Instant::now();
+    terminal.draw(|frame| render(frame, state, Duration::ZERO))?;
     for input in inputs {
         handle_input(state, input);
-        terminal.draw(|frame| render(frame, state))?;
+        terminal.draw(|frame| render(frame, state, started.elapsed()))?;
         if state.should_quit {
             break;
         }

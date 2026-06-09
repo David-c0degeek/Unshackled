@@ -396,11 +396,7 @@ impl AppState {
     pub fn apply(&mut self, event: UiEvent) {
         match event {
             UiEvent::TextDelta(delta) => {
-                let delta = if self.streaming.is_empty() {
-                    delta.trim_start_matches(['\r', '\n']).to_string()
-                } else {
-                    delta
-                };
+                let delta = normalize_text_delta(&self.streaming, &delta);
                 if !delta.is_empty() {
                     self.streaming.push_str(&delta);
                 }
@@ -565,6 +561,17 @@ fn compact_tool_output(output: &str) -> String {
     summary
 }
 
+fn normalize_text_delta(streaming: &str, delta: &str) -> String {
+    let trimmed = delta.trim_start_matches(['\r', '\n']);
+    if streaming.is_empty() {
+        trimmed.to_string()
+    } else if trimmed.len() == delta.len() {
+        delta.to_string()
+    } else {
+        format!("\n{trimmed}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,6 +625,35 @@ mod tests {
 
         assert_eq!(state.transcript.len(), 1);
         assert_eq!(state.transcript[0].text, "The answer");
+    }
+
+    #[test]
+    fn multi_completion_leading_blanks_are_dropped_for_each_completion() {
+        let mut state = state();
+        // First completion: leading blanks should be trimmed.
+        state.apply(UiEvent::TextDelta("\n\nFirst block".to_string()));
+        // Simulate a second completion within the same turn (e.g., after tool calls).
+        // Leading blanks should become one separator, not be dropped entirely.
+        state.apply(UiEvent::TextDelta("\n\nSecond block".to_string()));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "First block\nSecond block");
+    }
+
+    #[test]
+    fn streaming_keeps_natural_newlines_inside_each_delta() {
+        let mut state = state();
+        state.apply(UiEvent::TextDelta(
+            "\n\nFirst paragraph\n\nSecond paragraph".to_string(),
+        ));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(
+            state.transcript[0].text,
+            "First paragraph\n\nSecond paragraph"
+        );
     }
 
     #[test]
