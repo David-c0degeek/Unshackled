@@ -680,9 +680,7 @@ impl Tool for FetchUrl {
     }
     async fn invoke(&self, input: Value, _ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
         let input: FetchUrlInput = parse_input(&input)?;
-        let max_bytes = input
-            .max_bytes
-            .unwrap_or(MAX_OUTPUT_BYTES);
+        let max_bytes = input.max_bytes.unwrap_or(MAX_OUTPUT_BYTES);
         let url = input.url;
 
         let client = reqwest::Client::builder()
@@ -724,7 +722,10 @@ impl Tool for FetchUrl {
 
         let output = format!(
             "url: {}\nstatus: {}\ncontent-type: {}\nbytes: {}\n---\n{capped}",
-            url, status, content_type, body_bytes.len()
+            url,
+            status,
+            content_type,
+            body_bytes.len()
         );
         Ok(ToolOutput::ok(output))
     }

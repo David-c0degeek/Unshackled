@@ -396,10 +396,7 @@ impl AppState {
     pub fn apply(&mut self, event: UiEvent) {
         match event {
             UiEvent::TextDelta(delta) => {
-                let delta = normalize_text_delta(&self.streaming, &delta);
-                if !delta.is_empty() {
-                    self.streaming.push_str(&delta);
-                }
+                append_text_delta(&mut self.streaming, &delta);
             }
             UiEvent::ReasoningDelta(delta) => {
                 // Skip whitespace-only reasoning deltas so the thinking panel
@@ -411,10 +408,13 @@ impl AppState {
             UiEvent::TurnComplete => {
                 if !self.streaming.is_empty() {
                     let text = std::mem::take(&mut self.streaming);
-                    self.transcript.push(TranscriptLine {
-                        speaker: "assistant".to_string(),
-                        text,
-                    });
+                    let text = text.trim_end_matches(['\r', '\n']).to_string();
+                    if !text.is_empty() {
+                        self.transcript.push(TranscriptLine {
+                            speaker: "assistant".to_string(),
+                            text,
+                        });
+                    }
                 }
             }
             UiEvent::UserMessage(text) => self.transcript.push(TranscriptLine {
@@ -561,6 +561,18 @@ fn compact_tool_output(output: &str) -> String {
     summary
 }
 
+fn append_text_delta(streaming: &mut String, delta: &str) {
+    let delta = normalize_text_delta(streaming, delta);
+    if delta.is_empty() {
+        return;
+    }
+    if delta.starts_with('\n') {
+        let trimmed_len = streaming.trim_end_matches(['\r', '\n']).len();
+        streaming.truncate(trimmed_len);
+    }
+    streaming.push_str(&delta);
+}
+
 fn normalize_text_delta(streaming: &str, delta: &str) -> String {
     let trimmed = delta.trim_start_matches(['\r', '\n']);
     if streaming.is_empty() {
@@ -654,6 +666,32 @@ mod tests {
             state.transcript[0].text,
             "First paragraph\n\nSecond paragraph"
         );
+    }
+
+    #[test]
+    fn streaming_drops_trailing_blank_lines_on_completion() {
+        let mut state = state();
+        state.apply(UiEvent::TextDelta(
+            "First paragraph\n\nSecond paragraph\n\n".to_string(),
+        ));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(
+            state.transcript[0].text,
+            "First paragraph\n\nSecond paragraph"
+        );
+    }
+
+    #[test]
+    fn streaming_collapses_blank_lines_at_delta_boundaries() {
+        let mut state = state();
+        state.apply(UiEvent::TextDelta("First block\n\n".to_string()));
+        state.apply(UiEvent::TextDelta("\n\nSecond block".to_string()));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "First block\nSecond block");
     }
 
     #[test]
