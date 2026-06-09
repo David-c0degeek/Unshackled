@@ -12,9 +12,8 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, Event, KeyCode,
-    KeyEvent, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 use localpilot_config::{CliOverrides, ConfigPaths};
@@ -35,6 +34,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::key_input::{is_cancel, is_key_action, is_newline, is_submit};
+use crate::terminal_mouse::write_mouse_tracking_off;
 
 /// A pending approval handed from the [`TuiApprover`] (running inside the turn)
 /// to the event loop, which raises the modal and replies with the user's answer.
@@ -681,17 +681,14 @@ fn sandbox_profile(profile: UiProfile) -> Profile {
 }
 
 fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
-    terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        terminal::EnterAlternateScreen,
-        EnableBracketedPaste,
-        DisableMouseCapture
-        // Mouse capture is intentionally disabled: remote sessions (RustDesk/RDP)
-        // flood the event stream with mouse-movement bytes that corrupt the TUI.
-        // Scroll is handled by keyboard keys (PageUp/PageDown/Shift+Scroll) instead.
-    )?;
+    write_mouse_tracking_off(&mut stdout)?;
+    terminal::enable_raw_mode()?;
+    // Mouse capture is intentionally disabled: remote sessions (RustDesk/RDP)
+    // flood the event stream with mouse-movement bytes that corrupt the TUI.
+    // Scroll is handled by keyboard keys (PageUp/PageDown/Shift+Scroll) instead.
+    execute!(stdout, terminal::EnterAlternateScreen, EnableBracketedPaste)?;
+    write_mouse_tracking_off(&mut stdout)?;
     // Ask the terminal to report keys unambiguously (the kitty keyboard
     // protocol), so modified keys like Alt+Enter / Shift+Enter reach the app.
     // Pushed unconditionally (as Codex does): a terminal that doesn't support it
@@ -713,14 +710,14 @@ fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
 
 fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    let _ = write_mouse_tracking_off(terminal.backend_mut());
     terminal::disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         DisableBracketedPaste,
         terminal::LeaveAlternateScreen
     )?;
-    // Ensure mouse capture is disabled on exit as well.
-    let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
+    let _ = write_mouse_tracking_off(terminal.backend_mut());
     terminal.show_cursor()?;
     Ok(())
 }
