@@ -1,6 +1,8 @@
 # Code-Graph Ingestion: Design and Clean-Room Plan
 
 Date: 2026-06-08
+Revised: 2026-06-09 — TokenTamer added as a secondary concept reference
+(skeleton-as-node-summary; recency-decay + weighted-sum ranking shape).
 
 A standalone, source-level design study for giving LocalMind a **code-structure
 knowledge graph** — built by reading the workspace's files, docs, and folders —
@@ -121,6 +123,14 @@ already assigned to the inspectable agents OpenCode and Pi in
 reference, don't reinvent the wheel, but don't flat-out steal") is exactly this
 existing precedent, not a new exception.
 
+A second inspectable reference, **TokenTamer** (`github.com/borhen68/TokenTamer`),
+carries the *same* concept-reference status: a Python proxy + context-engine
+prototype studied for this work. It is weaker than graphify on the graph itself
+(Python-only AST, in-memory, no persistence) and contributes only narrow,
+concept-level techniques noted in §4 and §7. The same hard rule applies — no
+copying of code, identifiers, JSON shapes, or schema field names; everything is
+re-derived in LocalMind's vocabulary and rebuilt in Rust.
+
 What that permits and forbids:
 
 - **Permitted**: studying graphify to understand the *concept* — AST-to-graph
@@ -142,9 +152,9 @@ What that permits and forbids:
 - **PR provenance note** (required when a change was reference-informed):
 
   ```text
-  Concept cross-checked against the open-source graphify project as a
-  behavior reference. Schema, code, identifiers, and graph shapes are original
-  to LocalMind and re-derived from its own vision spec.
+  Concept cross-checked against the open-source graphify and TokenTamer
+  projects as behavior references. Schema, code, identifiers, and graph shapes
+  are original to LocalMind and re-derived from its own vision spec.
   ```
 
 This work also lands in the **LocalMind** repo, which carries its own provenance
@@ -180,6 +190,14 @@ Minimum viable code-structure subset:
   `Function`, `Test`, `Dependency`. Each node carries: stable id, kind, name,
   source location (file + span), a content hash (for incremental reindex), and a
   **provenance/confidence** record shared with the existing lesson provenance.
+- **Structural summary (optional, per code node)**: a signature-only skeleton —
+  the declaration with its body elided (`fn foo(a: A) -> B { … }`) — stored as a
+  compact field on `File`/`Type`/`Function` nodes. tree-sitter already yields the
+  signature span during the CG2 parse, so emitting it is near-free. Payoff: the
+  planner gets grounded signatures at retrieval time **without re-reading the
+  file** (directly serves §0), and the CG5 export renders structure for free.
+  Concept cross-checked against TokenTamer's body-stripping skeletonizer;
+  re-derived, no code carried.
 - **Edges**: `implemented_by`, `tested_by`, `documented_in`, `uses`,
   `belongs_to_project`. Each edge carries a confidence tag and the evidence
   (the span/import that justifies it).
@@ -223,7 +241,25 @@ Extend `localmind-search` to flip the placeholder `graph: bool` into a real
 capability: combine **graph traversal** (neighbors, shortest path, callers/
 callees, tests-of) with the existing keyword path and any future vector path,
 weighted by **recency and confidence** as the vision's retrieval layer (§6)
-specifies. The headline query the vision asks for —
+specifies.
+
+Concrete starting shape for the weighting (refine empirically):
+
+- **Temporal (recency) score** via exponential decay with a half-life:
+  `score = exp(-λ · age_days)` where `λ = ln(2) / half_life_days`. Edited today ≈
+  1.0; edited `half_life_days` ago = 0.5; long ago → 0. Deterministic, offline,
+  no model. Age comes from the same git/mtime signal CG3 uses for reindex.
+- **Combine** the signals as a weighted sum
+  `W_struct·structural + W_temporal·temporal + W_intent·intent`, weights
+  configurable and summing to 1.
+- **Neighbor boost** when retrieval has a focus node: score the focus node 1.0
+  and propagate down its graph edges (direct neighbors high, second-hop lower),
+  so a query anchored on one symbol pulls in its callers/callees/tests.
+
+Concept cross-checked against TokenTamer's git-recency engine and weighted-sum
+assembler; formula and shape re-derived, no code carried.
+
+The headline query the vision asks for —
 
 > "We are working on message processing. What do we know about this user's
 > preferences, previous bugs, architectural constraints, and relevant skills?"
@@ -307,14 +343,19 @@ existing lesson provenance; format version + migrate-on-load.
 workspace walk, tree-sitter parse (Rust first), extract
 `File`/`Module`/`Type`/`Function`/`Test` nodes and
 `implemented_by`/`tested_by`/`uses`/`documented_in` edges, confidence-tag,
-persist.
+persist. Emit an optional **signature-only skeleton** per code node (§4.1). When
+resolving `uses` edges (import/symbol → file), resolve precisely; tag any
+heuristic/prefix match `INFERRED` rather than asserting it — sloppy prefix
+matching invents false edges (an observed TokenTamer failure mode).
 
 **CG3 — Incremental, git-aware reindex.** Content-hash diffing, stale-node
 pruning with supersession, bounded background indexing.
 
 **CG4 — Graph-aware retrieval + the join.** Real graph traversal in
 `localmind-search`; recency/confidence weighting; `lesson ↔ code-node` anchoring
-so accepted memory attaches to real symbols.
+so accepted memory attaches to real symbols. Use the concrete weighting shape in
+§4.5 (half-life recency decay, weighted sum, focus-node neighbor boost) as the v1
+ranking, refined empirically.
 
 **CG5 — Surfaces.** `localmind-mcp` query tools (original names), LocalPilot CLI
 inspection, optional local HTML/JSON export — all permission-/redaction-gated.
@@ -343,6 +384,12 @@ inspection, optional local HTML/JSON export — all permission-/redaction-gated.
 - **graphify** (`github.com/safishamsi/graphify`) — open-source code-to-graph
   tool; **concept reference only** under `docs/00-clean-room.md` §"Local Behavior
   Reference" and the §10 precedent in `tasks/localpilot-next-phase-research.md`.
+- **TokenTamer** (`github.com/borhen68/TokenTamer`) — open-source Python proxy +
+  context-engine prototype; **secondary concept reference only** under
+  `docs/00-clean-room.md`. Contributes the skeleton-as-node-summary idea (§4.1,
+  CG2) and the recency-decay + weighted-sum + neighbor-boost ranking shape (§4.5,
+  CG4). Weaker than graphify on the graph itself (Python-only, in-memory); no code
+  or identifiers carried over.
 - **tree-sitter** — public AST parsing toolchain; candidate dependency.
 - `external/localmind/vision.md` §5 (Graph Knowledge Layer), §6 (Retrieval), §11
   (local-hardware optimization) — the authoritative schema and intent.
