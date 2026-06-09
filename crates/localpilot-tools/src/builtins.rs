@@ -636,6 +636,100 @@ impl Tool for RunShell {
     }
 }
 
+// --- fetch_url ----------------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FetchUrlInput {
+    /// URL to fetch.
+    url: String,
+    /// Maximum bytes to return (defaults to 64 KiB).
+    #[serde(default)]
+    max_bytes: Option<usize>,
+}
+
+const fn default_max_bytes() -> usize {
+    MAX_OUTPUT_BYTES
+}
+
+impl Default for FetchUrlInput {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            max_bytes: Some(default_max_bytes()),
+        }
+    }
+}
+
+pub struct FetchUrl;
+
+#[async_trait]
+impl Tool for FetchUrl {
+    fn name(&self) -> &'static str {
+        "fetch_url"
+    }
+    fn description(&self) -> &'static str {
+        "Fetch the content of a URL and return it as text. Use this to retrieve \
+         information from a website or API endpoint."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<FetchUrlInput>()
+    }
+    fn effects(&self, input: &Value, _ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        let _: FetchUrlInput = parse_input(input)?;
+        Ok(vec![Effect::Network])
+    }
+    async fn invoke(&self, input: Value, _ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: FetchUrlInput = parse_input(&input)?;
+        let max_bytes = input
+            .max_bytes
+            .unwrap_or(MAX_OUTPUT_BYTES);
+        let url = input.url;
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| ToolError::Failed(format!("failed to build HTTP client: {e}")))?;
+
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ToolError::Failed(format!("HTTP request failed: {e}")))?;
+
+        let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let body_bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ToolError::Failed(format!("failed to read response body: {e}")))?;
+
+        let text = String::from_utf8_lossy(&body_bytes);
+        let capped = if text.len() > max_bytes {
+            let mut end = max_bytes;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let mut truncated = text[..end].to_string();
+            truncated.push_str("\n... [output truncated]");
+            truncated
+        } else {
+            text.into_owned()
+        };
+
+        let output = format!(
+            "url: {}\nstatus: {}\ncontent-type: {}\nbytes: {}\n---\n{capped}",
+            url, status, content_type, body_bytes.len()
+        );
+        Ok(ToolOutput::ok(output))
+    }
+}
+
 // --- git_status / git_diff / git_log / git_add / git_restore / git_commit ---
 
 #[derive(Debug, Deserialize, JsonSchema)]

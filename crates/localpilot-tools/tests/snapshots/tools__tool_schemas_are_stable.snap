@@ -281,6 +281,33 @@ expression: "serde_json::to_string_pretty(&schemas).unwrap()"
     }
   ],
   [
+    "fetch_url",
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "max_bytes": {
+          "default": null,
+          "description": "Maximum bytes to return (defaults to 64 KiB).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "URL to fetch.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "FetchUrlInput",
+      "type": "object"
+    }
+  ],
+  [
     "git_status",
     {
       "$schema": "http://json-schema.org/draft-07/schema#",

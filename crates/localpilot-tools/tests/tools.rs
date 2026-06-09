@@ -85,7 +85,7 @@ async fn unknown_tool_returns_an_error_result_not_a_panic() {
 #[test]
 fn every_builtin_generates_a_schema() {
     let registry = ToolRegistry::with_builtins();
-    assert_eq!(registry.names().len(), 15);
+    assert_eq!(registry.names().len(), 16);
     for (name, schema) in registry.schemas() {
         assert!(schema.is_object(), "{name} produced a non-object schema");
     }
@@ -498,4 +498,72 @@ async fn bypass_still_redacts_output_and_keeps_the_workspace_boundary() {
     assert!(escape.is_error);
     assert!(escape.output.contains("permission denied"));
     assert!(!outside_path.exists());
+}
+
+#[tokio::test]
+async fn fetch_url_returns_content_from_a_mock_server() {
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/hello.txt"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("Hello, world!"),
+        )
+        .mount(&server)
+        .await;
+
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::NonInteractive, true);
+
+    let result = dispatch(
+        &registry,
+        "fetch_url",
+        json!({ "url": format!("{}/hello.txt", server.uri()) }),
+        &c,
+        &bypass_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", result.output);
+    assert!(result.output.contains("status: 200"));
+    assert!(result.output.contains("Hello, world!"));
+    assert!(result.output.contains("content-type: text/plain"));
+}
+
+#[tokio::test]
+async fn fetch_url_respects_max_bytes() {
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/long.txt"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("AB".repeat(1000)),
+        )
+        .mount(&server)
+        .await;
+
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::NonInteractive, true);
+
+    let result = dispatch(
+        &registry,
+        "fetch_url",
+        json!({ "url": format!("{}/long.txt", server.uri()), "max_bytes": 50 }),
+        &c,
+        &bypass_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error);
+    assert!(result.output.contains("[output truncated]"));
 }
