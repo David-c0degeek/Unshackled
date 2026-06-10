@@ -47,6 +47,7 @@ async fn an_mcp_write_is_denied_like_a_builtin_write() {
         workspace: &ws,
         interactivity: Interactivity::NonInteractive,
         trusted: true,
+        retention: None,
     };
     let result = registry
         .dispatch(
@@ -88,6 +89,7 @@ async fn mcp_tool_output_is_redacted() {
         workspace: &ws,
         interactivity: Interactivity::NonInteractive,
         trusted: true,
+        retention: None,
     };
     let result = registry
         .dispatch(
@@ -145,6 +147,7 @@ async fn repeated_mcp_registry_rebuilds_preserve_dynamic_metadata_and_routing() 
             workspace: &ws,
             interactivity: Interactivity::NonInteractive,
             trusted: true,
+            retention: None,
         };
         let result = registry
             .dispatch(

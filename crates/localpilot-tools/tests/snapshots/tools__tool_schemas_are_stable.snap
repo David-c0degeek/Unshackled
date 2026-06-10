@@ -1,6 +1,5 @@
 ---
 source: crates/localpilot-tools/tests/tools.rs
-assertion_line: 98
 expression: "serde_json::to_string_pretty(&schemas).unwrap()"
 ---
 [
@@ -246,6 +245,118 @@ expression: "serde_json::to_string_pretty(&schemas).unwrap()"
     }
   ],
   [
+    "apply_patch",
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": {
+        "PatchHunk": {
+          "properties": {
+            "new_text": {
+              "description": "Replacement text.",
+              "type": "string"
+            },
+            "old_text": {
+              "description": "Exact text to replace; must match exactly once at the point this hunk is applied.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "new_text",
+            "old_text"
+          ],
+          "type": "object"
+        },
+        "PatchOperation": {
+          "oneOf": [
+            {
+              "description": "Create a new file (fails if the file already exists).",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "create"
+                  ],
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "content",
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Apply exact-match hunks to an existing file, in order.",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "update"
+                  ],
+                  "type": "string"
+                },
+                "hunks": {
+                  "items": {
+                    "$ref": "#/definitions/PatchHunk"
+                  },
+                  "type": "array"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "hunks",
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Delete an existing file.",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "delete"
+                  ],
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "description": "A structured multi-file patch. The grammar is typed JSON generated from these structs (original to this repository): an ordered list of operations, each creating, updating (exact-match hunks), or deleting one file.",
+      "properties": {
+        "operations": {
+          "description": "Ordered file operations; the whole patch is validated before any write.",
+          "items": {
+            "$ref": "#/definitions/PatchOperation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "title": "ApplyPatchInput",
+      "type": "object"
+    }
+  ],
+  [
     "run_shell",
     {
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -277,6 +388,43 @@ expression: "serde_json::to_string_pretty(&schemas).unwrap()"
         "program"
       ],
       "title": "RunShellInput",
+      "type": "object"
+    }
+  ],
+  [
+    "read_tool_output",
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "end_line": {
+          "default": null,
+          "description": "Last line to include (1-based, inclusive).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The retention id from a truncated tool result.",
+          "type": "string"
+        },
+        "start_line": {
+          "default": null,
+          "description": "First line to include (1-based, inclusive).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ReadToolOutputInput",
       "type": "object"
     }
   ],

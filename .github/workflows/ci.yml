@@ -1,4 +1,4 @@
-﻿name: ci
+name: ci
 
 on:
   push:
@@ -55,3 +55,44 @@ jobs:
       - run: cargo deny check
       - run: cargo audit
       - run: cargo machete
+
+  lockfile-guard:
+    name: lockfile guard (no unexplained Cargo.lock drift)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # A Cargo.lock change without a matching manifest change means a
+      # dependency moved without a deliberate decision (docs/13 §1: pins are
+      # exact; bumps are their own commit). Surface it as a failure so the
+      # change is explained, not silent.
+      - name: fail on lockfile-only dependency drift
+        run: |
+          base="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          changed="$(git diff --name-only "$base"...HEAD)"
+          if echo "$changed" | grep -qx "Cargo.lock"; then
+            if ! echo "$changed" | grep -q "Cargo.toml"; then
+              echo "Cargo.lock changed without any Cargo.toml change."
+              echo "Dependency moves must come from a manifest decision."
+              exit 1
+            fi
+          fi
+
+  install-smoke:
+    name: clean-environment install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.82"
+      - uses: Swatinem/rust-cache@v2
+      # Install exactly what a user would get, from the locked graph, into a
+      # fresh root; then prove the produced binary runs.
+      - run: cargo install --path crates/localpilot-cli --locked --root "$RUNNER_TEMP/install-smoke"
+      - run: '"$RUNNER_TEMP/install-smoke/bin/localpilot" --help'

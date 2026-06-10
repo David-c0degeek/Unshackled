@@ -28,12 +28,17 @@ pub struct SkillSet {
 }
 
 impl SkillSet {
-    /// Load skills from each directory: every immediate subdirectory containing a
-    /// `skill.toml` and a `SKILL.md` is a skill. Later directories do not override
-    /// earlier ones; all are collected.
+    /// Load skills from each directory: every immediate subdirectory containing
+    /// a `SKILL.md` is a skill. A directory with a `skill.toml` uses the
+    /// LocalPilot manifest (triggers, required tools, permission
+    /// declarations); a directory with only a `SKILL.md` is read in the
+    /// standard agentskills.io format (YAML frontmatter `name` +
+    /// `description`), so cross-harness skill directories load as-is. Later
+    /// directories do not override earlier ones; all are collected.
     ///
     /// # Errors
-    /// Returns [`SkillError::InvalidManifest`] if a manifest fails to parse.
+    /// Returns [`SkillError::InvalidManifest`] if a manifest or frontmatter
+    /// fails to parse.
     pub fn load(dirs: &[PathBuf]) -> Result<Self, SkillError> {
         let mut skills = Vec::new();
         for dir in dirs {
@@ -44,16 +49,25 @@ impl SkillSet {
                 let skill_dir = entry.path();
                 let manifest_path = skill_dir.join("skill.toml");
                 let instructions_path = skill_dir.join("SKILL.md");
-                if !manifest_path.is_file() || !instructions_path.is_file() {
+                if !instructions_path.is_file() {
                     continue;
                 }
-                let manifest = SkillManifest::parse(&read(&manifest_path)?)?;
-                let instructions = read(&instructions_path)?;
-                skills.push(Skill {
-                    manifest,
-                    instructions,
-                    dir: skill_dir,
-                });
+                let skill = if manifest_path.is_file() {
+                    Skill {
+                        manifest: SkillManifest::parse(&read(&manifest_path)?)?,
+                        instructions: read(&instructions_path)?,
+                        dir: skill_dir,
+                    }
+                } else {
+                    let (manifest, body) =
+                        SkillManifest::parse_skill_md(&read(&instructions_path)?)?;
+                    Skill {
+                        manifest,
+                        instructions: body,
+                        dir: skill_dir,
+                    }
+                };
+                skills.push(skill);
             }
         }
         Ok(Self { skills })
@@ -99,6 +113,17 @@ impl SkillSet {
     }
 }
 
+/// The project-local skill directories LocalPilot reads, in load order: its
+/// own directory first, then cross-harness standard locations. Project-local
+/// skills load only behind the workspace trust gate (the caller enforces it).
+#[must_use]
+pub fn standard_skill_dirs(project_root: &Path) -> Vec<PathBuf> {
+    vec![
+        project_root.join(".localpilot").join("skills"),
+        project_root.join(".agents").join("skills"),
+    ]
+}
+
 fn read(path: &Path) -> Result<String, SkillError> {
     std::fs::read_to_string(path).map_err(|source| SkillError::Io {
         path: path.display().to_string(),
@@ -139,6 +164,61 @@ mod tests {
         assert!(skill.instructions.contains("Do the thing"));
         // Permissions are visible before execution.
         assert_eq!(skill.declared_permissions(), &["read:repo".to_string()]);
+    }
+
+    #[test]
+    fn loads_a_standard_skill_md_without_a_toml_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("pdf-processing");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---
+name: pdf-processing
+description: Extract text from PDF files
+metadata:
+  version: \"1.2.0\"
+---
+
+# PDF Processing
+
+Use the bundled script.
+",
+        )
+        .unwrap();
+
+        let set = SkillSet::load(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(set.names(), vec!["pdf-processing"]);
+        let skill = set.by_name("pdf-processing").unwrap();
+        assert_eq!(skill.manifest.version, "1.2.0");
+        assert!(skill.instructions.starts_with("# PDF Processing"));
+        // No declared permissions: the manifest grants nothing implicitly.
+        assert!(skill.declared_permissions().is_empty());
+    }
+
+    #[test]
+    fn a_bad_standard_skill_name_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("bad");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---
+name: Not Valid
+description: x
+---
+body
+",
+        )
+        .unwrap();
+        assert!(SkillSet::load(&[dir.path().to_path_buf()]).is_err());
+    }
+
+    #[test]
+    fn standard_dirs_cover_localpilot_and_cross_harness_locations() {
+        let dirs = standard_skill_dirs(Path::new("/repo"));
+        assert!(dirs[0].ends_with("skills"));
+        assert_eq!(dirs.len(), 2);
     }
 
     #[test]

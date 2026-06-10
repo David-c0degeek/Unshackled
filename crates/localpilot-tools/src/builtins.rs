@@ -11,7 +11,34 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::ToolError;
-use crate::tool::{parse_input, schema_for, Tool, ToolContext, ToolOutput};
+use crate::tool::{detail_preview, parse_input, schema_for, Tool, ToolContext, ToolOutput};
+
+/// Approval detail from a single string field of the input. Tools know their
+/// own schema; this is a typed read, not cross-tool key-guessing.
+fn string_field_detail(input: &Value, key: &str) -> String {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(detail_preview)
+        .unwrap_or_default()
+}
+
+/// Approval detail for a `paths` array field, joined for display.
+fn paths_detail(input: &Value, prefix: &str) -> String {
+    let joined = input
+        .get("paths")
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    detail_preview(&format!("{prefix} {joined}"))
+}
 
 /// Cap on a tool's textual output before truncation.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -95,6 +122,9 @@ impl Tool for ReadFile {
     fn name(&self) -> &'static str {
         "read_file"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "Read UTF-8 text from a file in the workspace, optionally a line range."
     }
@@ -151,6 +181,9 @@ impl Tool for WriteFile {
     fn name(&self) -> &'static str {
         "write_file"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "Create or replace a file in the workspace, preserving newline style."
     }
@@ -170,13 +203,16 @@ impl Tool for WriteFile {
     async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
         let input: WriteFileInput = parse_input(&input)?;
         let path = ctx.workspace.normalize(Path::new(&input.path))?;
-        let existing = std::fs::read_to_string(&path).ok();
-        if existing.is_some() && input.overwrite == Some(false) {
+        // Existence is checked on the path itself: a non-UTF-8 (binary) file
+        // fails `read_to_string` but must still refuse an overwrite=false
+        // write. The lossy read is used only for newline detection.
+        if path.exists() && input.overwrite == Some(false) {
             return Err(ToolError::Failed(format!(
                 "{} exists and overwrite is false",
                 path.display()
             )));
         }
+        let existing = std::fs::read_to_string(&path).ok();
         let newline = existing.as_deref().map_or("\n", detect_newline);
         let body = apply_newline(&input.content, newline);
         atomic_write(&path, body.as_bytes())?;
@@ -206,6 +242,9 @@ pub struct EditFile;
 impl Tool for EditFile {
     fn name(&self) -> &'static str {
         "edit_file"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
     }
     fn description(&self) -> &'static str {
         "Replace an exact, unique snippet in a workspace file; rejects ambiguous edits."
@@ -263,6 +302,9 @@ pub struct MultiEdit;
 impl Tool for MultiEdit {
     fn name(&self) -> &'static str {
         "multi_edit"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
     }
     fn description(&self) -> &'static str {
         "Apply several exact text replacements to one workspace file atomically; rejects missing or ambiguous context."
@@ -334,6 +376,9 @@ impl Tool for ListFiles {
     fn name(&self) -> &'static str {
         "list_files"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "List files under a workspace directory, respecting ignore files."
     }
@@ -404,6 +449,9 @@ pub struct FindFiles;
 impl Tool for FindFiles {
     fn name(&self) -> &'static str {
         "find_files"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "pattern")
     }
     fn description(&self) -> &'static str {
         "Find workspace files by filename pattern, respecting ignore files."
@@ -496,6 +544,9 @@ impl Tool for SearchText {
     fn name(&self) -> &'static str {
         "search_text"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "query")
+    }
     fn description(&self) -> &'static str {
         "Search workspace files for text or a regex, respecting ignore files."
     }
@@ -562,6 +613,244 @@ impl Tool for SearchText {
     }
 }
 
+// --- apply_patch ------------------------------------------------------------
+
+/// A structured multi-file patch. The grammar is typed JSON generated from
+/// these structs (original to this repository): an ordered list of operations,
+/// each creating, updating (exact-match hunks), or deleting one file.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ApplyPatchInput {
+    /// Ordered file operations; the whole patch is validated before any write.
+    operations: Vec<PatchOperation>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum PatchOperation {
+    /// Create a new file (fails if the file already exists).
+    Create { path: String, content: String },
+    /// Apply exact-match hunks to an existing file, in order.
+    Update { path: String, hunks: Vec<PatchHunk> },
+    /// Delete an existing file.
+    Delete { path: String },
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PatchHunk {
+    /// Exact text to replace; must match exactly once at the point this hunk
+    /// is applied.
+    old_text: String,
+    /// Replacement text.
+    new_text: String,
+}
+
+impl PatchOperation {
+    fn path(&self) -> &str {
+        match self {
+            PatchOperation::Create { path, .. }
+            | PatchOperation::Update { path, .. }
+            | PatchOperation::Delete { path } => path,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            PatchOperation::Create { path, .. } => format!("create {path}"),
+            PatchOperation::Update { path, hunks } => {
+                format!("update {path} ({} hunks)", hunks.len())
+            }
+            PatchOperation::Delete { path } => format!("delete {path}"),
+        }
+    }
+}
+
+pub struct ApplyPatch;
+
+#[async_trait]
+impl Tool for ApplyPatch {
+    fn name(&self) -> &'static str {
+        "apply_patch"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        // The diff preview for the approval prompt: one line per operation.
+        let Ok(input) = serde_json::from_value::<ApplyPatchInput>(input.clone()) else {
+            return String::new();
+        };
+        let lines: Vec<String> = input
+            .operations
+            .iter()
+            .take(12)
+            .map(PatchOperation::describe)
+            .collect();
+        detail_preview(&lines.join("; "))
+    }
+    fn description(&self) -> &'static str {
+        "Apply a structured multi-file patch: create, update (exact-match hunks), or delete files. Validated atomically before any write."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<ApplyPatchInput>()
+    }
+    fn effects(&self, input: &Value, ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        let input: ApplyPatchInput = parse_input(input)?;
+        if input.operations.is_empty() {
+            return Err(ToolError::InvalidInput(
+                "operations must contain at least one file operation".to_string(),
+            ));
+        }
+        Ok(input
+            .operations
+            .iter()
+            .map(|op| {
+                let overwrite = !matches!(op, PatchOperation::Create { .. });
+                write_path_effect(ctx, Path::new(op.path()), overwrite)
+            })
+            .collect())
+    }
+    async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: ApplyPatchInput = parse_input(&input)?;
+
+        // Validate every operation against the current tree before any write,
+        // so a rejected hunk fails the whole patch with nothing applied.
+        let mut writes: Vec<(PathBuf, Option<String>)> = Vec::new();
+        for (index, op) in input.operations.iter().enumerate() {
+            let label = format!("operation {} ({})", index + 1, op.describe());
+            let path = ctx.workspace.normalize(Path::new(op.path()))?;
+            match op {
+                PatchOperation::Create { content, .. } => {
+                    if path.exists() {
+                        return Err(ToolError::Failed(format!(
+                            "{label}: the file already exists; use an update operation"
+                        )));
+                    }
+                    writes.push((path, Some(content.clone())));
+                }
+                PatchOperation::Update { hunks, .. } => {
+                    if hunks.is_empty() {
+                        return Err(ToolError::InvalidInput(format!(
+                            "{label}: hunks must contain at least one replacement"
+                        )));
+                    }
+                    let original = std::fs::read_to_string(&path)
+                        .map_err(|e| ToolError::Failed(format!("{label}: {e}")))?;
+                    let mut updated = original.clone();
+                    for (hunk_index, hunk) in hunks.iter().enumerate() {
+                        match updated.matches(&hunk.old_text).count() {
+                            0 => {
+                                return Err(ToolError::Failed(format!(
+                                    "{label}: hunk {} old_text was not found; \
+                                     re-read the file and resend the patch",
+                                    hunk_index + 1
+                                )))
+                            }
+                            1 => {
+                                updated = updated.replacen(&hunk.old_text, &hunk.new_text, 1);
+                            }
+                            n => {
+                                return Err(ToolError::Failed(format!(
+                                    "{label}: hunk {} old_text matches {n} times; \
+                                     provide a unique snippet",
+                                    hunk_index + 1
+                                )))
+                            }
+                        }
+                    }
+                    let newline = detect_newline(&original);
+                    writes.push((path, Some(apply_newline(&updated, newline))));
+                }
+                PatchOperation::Delete { .. } => {
+                    if !path.exists() {
+                        return Err(ToolError::Failed(format!(
+                            "{label}: the file does not exist"
+                        )));
+                    }
+                    writes.push((path, None));
+                }
+            }
+        }
+
+        // Apply. Each file write is atomic (temp-then-rename); validation
+        // above makes the whole patch all-or-nothing in practice.
+        let mut applied = Vec::new();
+        for ((path, content), op) in writes.iter().zip(&input.operations) {
+            match content {
+                Some(content) => atomic_write(path, content.as_bytes())?,
+                None => std::fs::remove_file(path)
+                    .map_err(|e| ToolError::Failed(format!("{}: {e}", path.display())))?,
+            }
+            applied.push(op.describe());
+        }
+        Ok(ToolOutput::ok(format!("applied: {}", applied.join("; "))))
+    }
+}
+
+// --- read_tool_output --------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ReadToolOutputInput {
+    /// The retention id from a truncated tool result.
+    id: String,
+    /// First line to include (1-based, inclusive).
+    #[serde(default)]
+    start_line: Option<usize>,
+    /// Last line to include (1-based, inclusive).
+    #[serde(default)]
+    end_line: Option<usize>,
+}
+
+/// Fetches the full output of an earlier tool call whose result was truncated
+/// in context and spilled to the retention store.
+pub struct ReadToolOutput;
+
+#[async_trait]
+impl Tool for ReadToolOutput {
+    fn name(&self) -> &'static str {
+        "read_tool_output"
+    }
+    fn description(&self) -> &'static str {
+        "Read the full retained output of an earlier tool call that was truncated in context, by its retention id, optionally a line range."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<ReadToolOutputInput>()
+    }
+    fn effects(&self, input: &Value, _ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        // Reads runtime state already mediated at capture time; no new side
+        // effect.
+        let _: ReadToolOutputInput = parse_input(input)?;
+        Ok(Vec::new())
+    }
+    async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: ReadToolOutputInput = parse_input(&input)?;
+        let Some(retention) = ctx.retention else {
+            return Err(ToolError::Failed(
+                "no retained output is available in this session".to_string(),
+            ));
+        };
+        let full = retention
+            .fetch(&input.id)
+            .map_err(ToolError::Failed)?
+            .ok_or_else(|| {
+                ToolError::Failed(format!("no retained output under id {}", input.id))
+            })?;
+        let selected = match (input.start_line, input.end_line) {
+            (None, None) => full,
+            (start, end) => {
+                let start = start.unwrap_or(1).max(1);
+                let end = end.unwrap_or(usize::MAX);
+                full.lines()
+                    .enumerate()
+                    .filter(|(i, _)| {
+                        let line = i + 1;
+                        line >= start && line <= end
+                    })
+                    .map(|(_, l)| l)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        };
+        Ok(cap(selected))
+    }
+}
+
 // --- run_shell --------------------------------------------------------------
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -584,6 +873,25 @@ pub struct RunShell;
 impl Tool for RunShell {
     fn name(&self) -> &'static str {
         "run_shell"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        // The user must see the full command line they are approving.
+        let program = input.get("program").and_then(Value::as_str).unwrap_or("");
+        let args = input
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|args| {
+                args.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        if args.is_empty() {
+            detail_preview(program)
+        } else {
+            detail_preview(&format!("{program} {args}"))
+        }
     }
     fn description(&self) -> &'static str {
         "Run a command as an argument list (no shell), with a timeout."
@@ -648,6 +956,9 @@ impl Tool for GitStatus {
     fn name(&self) -> &'static str {
         "git_status"
     }
+    fn approval_detail(&self, _input: &Value) -> String {
+        "git status".to_string()
+    }
     fn description(&self) -> &'static str {
         "Show the working tree status (read-only)."
     }
@@ -679,6 +990,9 @@ pub struct GitDiff;
 impl Tool for GitDiff {
     fn name(&self) -> &'static str {
         "git_diff"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git diff")
     }
     fn description(&self) -> &'static str {
         "Show unstaged or staged git diff output for optional paths."
@@ -717,6 +1031,9 @@ impl Tool for GitLog {
     fn name(&self) -> &'static str {
         "git_log"
     }
+    fn approval_detail(&self, _input: &Value) -> String {
+        "git log".to_string()
+    }
     fn description(&self) -> &'static str {
         "Show recent git commits in one-line form."
     }
@@ -746,6 +1063,9 @@ impl Tool for GitAdd {
     fn name(&self) -> &'static str {
         "git_add"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git add")
+    }
     fn description(&self) -> &'static str {
         "Stage specific workspace paths with git add."
     }
@@ -774,6 +1094,9 @@ pub struct GitRestore;
 impl Tool for GitRestore {
     fn name(&self) -> &'static str {
         "git_restore"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git restore")
     }
     fn description(&self) -> &'static str {
         "Discard working-tree changes for specific paths with git restore; requires destructive-command approval."
@@ -812,6 +1135,9 @@ pub struct GitCommit;
 impl Tool for GitCommit {
     fn name(&self) -> &'static str {
         "git_commit"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git commit")
     }
     fn description(&self) -> &'static str {
         "Create a commit from intended files; rejects secret-bearing messages."

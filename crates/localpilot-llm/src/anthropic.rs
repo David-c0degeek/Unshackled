@@ -20,7 +20,8 @@ use localpilot_core::{ContentBlock, Message, Role, Secret, TokenUsage};
 use serde_json::{json, Value};
 
 use crate::error::{ProviderError, QuotaInfo};
-use crate::event::{split_inline_thinking, ModelEvent, ModelEventStream};
+use crate::event::{InlineThinkingFilter, ModelEvent, ModelEventStream};
+use crate::headers::{parse_retry_after, parse_rfc3339_epoch};
 use crate::provider::{
     AuthRequirement, Capabilities, InputBlockKind, ModelProvider, ProviderDeclaration,
     ReasoningShape, SourceType, ToolCallShape,
@@ -30,7 +31,10 @@ use crate::request::{ModelRequest, ToolSpec};
 /// The documented Messages API version header value.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// `max_tokens` is required by the API; used when the request does not set one.
-const DEFAULT_MAX_TOKENS: u64 = 4096;
+/// Sized for a coding agent that writes whole files in one reply — a low cap
+/// surfaces as routine truncation warnings. Override per provider with the
+/// `max_tokens` option in the provider's `options` table.
+const DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// An Anthropic Messages API provider.
 pub struct AnthropicProvider {
@@ -104,7 +108,17 @@ impl AnthropicProvider {
         self
     }
 
-    /// Build the JSON request body sent to `/messages`.
+    /// Declare the model's context window, consumed by the session budget.
+    #[must_use]
+    pub fn with_max_context_tokens(mut self, tokens: Option<u64>) -> Self {
+        self.declaration.max_context_tokens = tokens;
+        self
+    }
+
+    /// Build the JSON request body sent to `/messages`. A requested reasoning
+    /// effort clamps to a no-op on this wire: mapping it onto the extended-
+    /// thinking request shape changes the response stream contract, which is a
+    /// deliberate future change, not a side effect of an effort knob.
     #[must_use]
     pub fn build_body(&self, request: &ModelRequest) -> Value {
         let (system, messages) = translate_messages(&request.messages);
@@ -196,15 +210,19 @@ fn translate_tool(tool: &ToolSpec) -> Value {
 }
 
 /// Translate the internal message list into Anthropic's `(system, messages)`
-/// pair. System content is hoisted to the top-level string; tool results become
-/// `tool_result` blocks in a user message; consecutive messages that map to the
-/// same role are merged, since the API requires alternating roles.
+/// pair. Only the *leading* run of system messages is hoisted to the top-level
+/// string; a system message injected later in the conversation keeps its
+/// position and is delivered as user-role content, since this wire has no
+/// positional system role (see docs/04 §Late System Messages). Tool results
+/// become `tool_result` blocks in a user message; consecutive messages that map
+/// to the same role are merged, since the API requires alternating roles.
 fn translate_messages(messages: &[Message]) -> (String, Vec<Value>) {
     let mut system = String::new();
     let mut turns: Vec<(&'static str, Vec<Value>)> = Vec::new();
+    let mut in_leading_system = true;
 
     for message in messages {
-        if message.role == Role::System {
+        if message.role == Role::System && in_leading_system {
             for block in &message.content {
                 if let ContentBlock::Text { text } = block {
                     if !system.is_empty() {
@@ -215,6 +233,7 @@ fn translate_messages(messages: &[Message]) -> (String, Vec<Value>) {
             }
             continue;
         }
+        in_leading_system = false;
 
         let role = anthropic_role(message.role);
         let blocks = translate_blocks(message);
@@ -286,10 +305,11 @@ fn translate_blocks(message: &Message) -> Vec<Value> {
 
 fn anthropic_role(role: Role) -> &'static str {
     match role {
-        // Tool results are delivered to the model in a user turn.
-        Role::User | Role::Tool => "user",
+        // Tool results and surfaced shell runs are delivered in a user turn.
+        Role::User | Role::Tool | Role::UserShell => "user",
         Role::Assistant => "assistant",
-        // System is hoisted out before this is called; treat as user defensively.
+        // A non-leading system message keeps its position as user-role content;
+        // this wire has no positional system role.
         Role::System => "user",
     }
 }
@@ -317,17 +337,28 @@ async fn classify_error_response(status: u16, response: reqwest::Response) -> Pr
 }
 
 fn quota_from_headers(headers: &reqwest::header::HeaderMap) -> QuotaInfo {
-    let retry_after = headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
-    let limit_kind = headers
-        .get("anthropic-ratelimit-requests-limit")
-        .map(|_| "requests".to_string());
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    // `retry-after` is delay-seconds (or an HTTP-date); the documented
+    // `anthropic-ratelimit-*-reset` headers carry RFC 3339 timestamps.
+    // Unparseable values degrade to absent metadata, never an error.
+    let retry_after = header("retry-after")
+        .and_then(|value| parse_retry_after(value, std::time::SystemTime::now()));
+    let mut reset_at = None;
+    let mut limit_kind = None;
+    for kind in ["requests", "tokens", "input-tokens", "output-tokens"] {
+        let name = format!("anthropic-ratelimit-{kind}-reset");
+        if let Some(epoch) = header(&name).and_then(parse_rfc3339_epoch) {
+            reset_at = Some(epoch);
+            limit_kind = Some(kind.to_string());
+            break;
+        }
+    }
+    if limit_kind.is_none() && headers.contains_key("anthropic-ratelimit-requests-limit") {
+        limit_kind = Some("requests".to_string());
+    }
     QuotaInfo {
         retry_after,
-        reset_at: None,
+        reset_at,
         limit_kind,
         retryable: true,
         raw_provider_code: None,
@@ -376,9 +407,12 @@ type EventQueue = VecDeque<Result<ModelEvent, ProviderError>>;
 /// Incremental decoder for Anthropic's typed server-sent events. Tool input
 /// arrives as `input_json_delta` fragments accumulated per content-block index
 /// and assembled into a single [`ModelEvent::ToolCall`] at `content_block_stop`.
+/// Raw bytes are buffered and only complete lines are decoded, so a multi-byte
+/// UTF-8 character split across network chunks is never corrupted.
 #[derive(Default)]
 struct SseDecoder {
-    buf: String,
+    buf: Vec<u8>,
+    thinking: InlineThinkingFilter,
     tools: BTreeMap<u64, ToolAccum>,
     open_blocks: BTreeSet<u64>,
     closed_blocks: usize,
@@ -398,18 +432,26 @@ struct ToolAccum {
 
 impl SseDecoder {
     fn push(&mut self, bytes: &[u8], out: &mut EventQueue) {
-        self.buf.push_str(&String::from_utf8_lossy(bytes));
-        while let Some(pos) = self.buf.find('\n') {
-            let line: String = self.buf.drain(..=pos).collect();
+        // Buffer raw bytes; only complete lines are decoded. A multi-byte
+        // character cannot contain a newline byte, so splitting at `\n` never
+        // splits a character.
+        self.buf.extend_from_slice(bytes);
+        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line);
             self.process_line(line.trim(), out);
         }
     }
 
     fn finish(&mut self, out: &mut EventQueue) {
-        if !self.buf.trim().is_empty() {
-            let line = std::mem::take(&mut self.buf);
-            self.process_line(line.trim(), out);
+        if !self.buf.is_empty() {
+            let tail = std::mem::take(&mut self.buf);
+            let line = String::from_utf8_lossy(&tail);
+            if !line.trim().is_empty() {
+                self.process_line(line.trim(), out);
+            }
         }
+        self.flush_thinking(out);
         if !self.done {
             if self.saw_stop_reason && self.open_blocks.is_empty() && self.content_complete() {
                 self.emit_done(out);
@@ -426,8 +468,15 @@ impl SseDecoder {
         !self.saw_content_delta || self.closed_blocks > 0
     }
 
+    fn flush_thinking(&mut self, out: &mut EventQueue) {
+        for event in self.thinking.finish() {
+            out.push_back(Ok(event));
+        }
+    }
+
     fn emit_done(&mut self, out: &mut EventQueue) {
         if !self.done {
+            self.flush_thinking(out);
             self.done = true;
             out.push_back(Ok(ModelEvent::Done));
         }
@@ -522,7 +571,7 @@ impl SseDecoder {
             Some("text_delta") => {
                 if let Some(text) = delta["text"].as_str() {
                     if !text.is_empty() {
-                        for event in split_inline_thinking(text) {
+                        for event in self.thinking.push(text) {
                             out.push_back(Ok(event));
                         }
                     }
@@ -929,5 +978,118 @@ mod tests {
             Some(Err(ProviderError::StreamDecode(message)))
                 if message.contains("completion marker")
         ));
+    }
+
+    #[test]
+    fn late_system_message_keeps_its_position_as_user_content() {
+        let provider = AnthropicProvider::new(
+            "anthropic",
+            "Anthropic",
+            "https://api.anthropic.com/v1",
+            None,
+        );
+        let messages = vec![
+            Message::text(Role::System, "be terse"),
+            Message::text(Role::User, "hi"),
+            Message::text(Role::Assistant, "hello"),
+            // A host-injected late system message (e.g. retrieved context).
+            Message::text(Role::System, "project context: uses tokio"),
+            Message::text(Role::User, "continue"),
+        ];
+        let body = provider.build_body(&ModelRequest::new("claude", messages));
+        // Only the leading system message is hoisted.
+        assert_eq!(body["system"], "be terse");
+        let turns = body["messages"].as_array().unwrap();
+        // user, assistant, then the late system folded into the next user turn
+        // at its original position.
+        assert_eq!(turns.len(), 3);
+        assert_eq!(turns[2]["role"], "user");
+        let content = turns[2]["content"].as_str().unwrap();
+        assert!(content.starts_with("project context: uses tokio"));
+        assert!(content.contains("continue"));
+    }
+
+    #[test]
+    fn multibyte_character_split_across_network_chunks_survives() {
+        let line = "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"日本語\"}}\n".as_bytes();
+        let mut decoder = SseDecoder::default();
+        let mut out = EventQueue::new();
+        // Find the first multi-byte character and split inside it.
+        let split = line
+            .iter()
+            .position(|&b| b >= 0x80)
+            .expect("line contains a multi-byte character")
+            + 1;
+        assert!(std::str::from_utf8(&line[..split]).is_err());
+        decoder.push(&line[..split], &mut out);
+        decoder.push(&line[split..], &mut out);
+        decoder.push(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n".as_bytes(),
+            &mut out,
+        );
+        decoder.push(
+            b"data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            &mut out,
+        );
+        decoder.push(b"data: {\"type\":\"message_stop\"}\n", &mut out);
+        decoder.finish(&mut out);
+        let text: String = out
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ModelEvent::TextDelta(t)) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "\u{65e5}\u{672c}\u{8a9e}");
+        assert!(!text.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn think_tag_split_across_text_deltas_is_recognized() {
+        let events = collect_sse(&[
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"a<thi\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"nk>hidden</think>b\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_stop\"}\n",
+        ]);
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ModelEvent::TextDelta(t)) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "ab");
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Ok(ModelEvent::ReasoningDelta(r)) if r == "hidden")));
+    }
+
+    #[test]
+    fn quota_headers_parse_rfc3339_reset_and_retry_after_seconds() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "30".parse().unwrap());
+        headers.insert(
+            "anthropic-ratelimit-requests-reset",
+            "1970-01-01T00:02:00Z".parse().unwrap(),
+        );
+        let quota = quota_from_headers(&headers);
+        assert_eq!(quota.retry_after, Some(Duration::from_secs(30)));
+        assert_eq!(quota.reset_at, Some(120));
+        assert_eq!(quota.limit_kind.as_deref(), Some("requests"));
+    }
+
+    #[test]
+    fn unparseable_quota_headers_degrade_to_absent_metadata() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "soon".parse().unwrap());
+        headers.insert(
+            "anthropic-ratelimit-tokens-reset",
+            "whenever".parse().unwrap(),
+        );
+        let quota = quota_from_headers(&headers);
+        assert_eq!(quota.retry_after, None);
+        assert_eq!(quota.reset_at, None);
     }
 }

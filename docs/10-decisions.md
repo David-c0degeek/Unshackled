@@ -1,6 +1,72 @@
-﻿# Architecture Decision Records
+# Architecture Decision Records
 
 This file starts the decision log. Add new records at the top.
+
+## ADR-0011: Store Convergence — Execution Record vs Memory
+
+Status: accepted
+
+LocalPilot persists state in two stacks, which were growing toward overlap.
+This record fixes the ownership boundary:
+
+- **The LocalPilot store (`.localpilot/`) is the execution record, and only
+  that**: transcripts, the durable session event log (tree-shaped, format-
+  versioned), caches, tool-output snapshots, provider metadata, and recovery
+  diagnostics. It never grows memory, lesson, retrieval, or review features.
+- **LocalMind (`.localmind/`) is the only memory and learning backend**:
+  session closeout, candidate lessons, the review queue, accepted memory,
+  retrieval/context injection, skill drafts, and audit. New rich-learning
+  behavior lands in LocalMind, never as a host-local memory implementation.
+- **One redaction authority at the host boundary.** LocalPilot's redaction
+  stack (`localpilot-config::redact`) is the canonical redactor: everything
+  the host persists or hands to LocalMind is redacted by it first. LocalMind's
+  import-time redaction remains as engine-internal defense in depth, not a
+  second authority — divergence between the two pattern sets is resolved by
+  updating the host stack.
+
+Reason:
+
+- two stores with drifting responsibilities and two redaction pattern sets is
+  how secrets leak and how features get implemented twice
+- the event log needs a single unambiguous home (the execution record) before
+  later features (headless drive, hooks, subagents) build on it
+- LocalMind is host-neutral and reusable; baking memory into the LocalPilot
+  store would fork that capability
+
+## ADR-0010: Reliability Contract for Unattended Operation
+
+Status: accepted
+
+LocalPilot's differentiator is unattended multi-step execution. That claim is
+made testable by an explicit **reliability contract**: a small set of named
+invariants the runtime guarantees on every exit path, each pinned by a named
+test, split across the owning specs:
+
+- Session-loop invariants (tool-result pairing on every exit path, no partial
+  replies persisted, transcript fidelity) —
+  [`docs/06`](06-harness-spec.md) §Reliability Contract.
+- Permission invariants (no `run_shell` path weaker than the equivalent
+  builtin, floor-aware allowlists that never lift destructive/privileged/
+  unknown gating, wrapper commands never auto-allowed, approval prompts that
+  state their target) — [`docs/07`](07-security-and-privacy.md) §Reliability
+  Contract.
+
+A change that breaks a contract-pinning test is a contract change: it requires
+a superseding ADR, not a test edit. The bypass profile's scope is part of the
+contract: bypass keeps the workspace boundary for path-bearing effects only;
+shell commands are not path-contained, and the docs state this rather than
+implying containment that does not exist.
+
+Reason:
+
+- the product's central claim ("every side effect passes a typed permission
+  engine"; "safe to run unsupervised") was previously aspiration enforced
+  only by convention — line-level review found exit paths and classification
+  gaps that falsified it
+- invariants stated in the spec and enforced by property tests survive
+  refactors; workflow descriptions do not
+- naming the tests in the spec makes the contract auditable: a reader can run
+  the contract
 
 ## ADR-0009: Discovered Project Quality Gate
 

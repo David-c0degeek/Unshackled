@@ -19,7 +19,8 @@ use localpilot_core::{ContentBlock, Message, Role, Secret, TokenUsage};
 use serde_json::{json, Value};
 
 use crate::error::{ProviderError, QuotaInfo};
-use crate::event::{split_inline_thinking, ModelEvent, ModelEventStream};
+use crate::event::{InlineThinkingFilter, ModelEvent, ModelEventStream};
+use crate::headers::{parse_compact_duration, parse_retry_after};
 use crate::provider::{
     AuthRequirement, Capabilities, InputBlockKind, ModelProvider, ProviderDeclaration,
     ReasoningShape, SourceType, ToolCallShape,
@@ -100,12 +101,19 @@ impl OpenAiProvider {
         self
     }
 
+    /// Declare the model's context window, consumed by the session budget.
+    #[must_use]
+    pub fn with_max_context_tokens(mut self, tokens: Option<u64>) -> Self {
+        self.declaration.max_context_tokens = tokens;
+        self
+    }
+
     /// Build the JSON request body sent to `/chat/completions`.
     #[must_use]
     pub fn build_body(&self, request: &ModelRequest) -> Value {
         let mut body = json!({
             "model": request.model,
-            "messages": translate_messages(&request.messages),
+            "messages": translate_messages(&request.messages, self.round_trips_reasoning()),
             "stream": true,
             "stream_options": { "include_usage": true },
         });
@@ -117,11 +125,17 @@ impl OpenAiProvider {
         }
         if let Value::Object(map) = &mut body {
             for (k, v) in self.default_options.iter().chain(request.options.iter()) {
-                if k == "suppress_thinking" {
+                if k == "suppress_thinking" || k == "reasoning_round_trip" {
                     continue;
                 }
                 map.insert(k.clone(), v.clone());
             }
+        }
+        // An explicit per-request effort overrides any option default; this is
+        // the documented `reasoning_effort` request field on effort-aware
+        // OpenAI-compatible servers.
+        if let Some(effort) = request.reasoning_effort {
+            body["reasoning_effort"] = json!(effort.as_str());
         }
         body
     }
@@ -139,6 +153,19 @@ impl OpenAiProvider {
 
     fn has_option(&self, key: &str, request: &ModelRequest) -> bool {
         self.default_options.contains_key(key) || request.options.contains_key(key)
+    }
+
+    /// Whether assistant reasoning round-trips as `reasoning_content` /
+    /// `reasoning_signature` message fields. These keys are a local-inference
+    /// convention (e.g. vLLM-style servers), not documented hosted-OpenAI
+    /// fields, and strict servers may reject unknown message fields — so they
+    /// are sent only to non-official endpoints unless the provider option
+    /// `reasoning_round_trip` overrides the default.
+    fn round_trips_reasoning(&self) -> bool {
+        self.default_options
+            .get("reasoning_round_trip")
+            .and_then(Value::as_bool)
+            .unwrap_or(self.declaration.source_type != SourceType::OfficialApi)
     }
 }
 
@@ -192,15 +219,15 @@ fn translate_tool(tool: &ToolSpec) -> Value {
     })
 }
 
-fn translate_messages(messages: &[Message]) -> Vec<Value> {
+fn translate_messages(messages: &[Message], round_trip_reasoning: bool) -> Vec<Value> {
     let mut out = Vec::new();
     for message in messages {
-        translate_message(message, &mut out);
+        translate_message(message, round_trip_reasoning, &mut out);
     }
     out
 }
 
-fn translate_message(message: &Message, out: &mut Vec<Value>) {
+fn translate_message(message: &Message, round_trip_reasoning: bool, out: &mut Vec<Value>) {
     // Tool results become their own role:"tool" messages, one per result.
     if message.role == Role::Tool {
         for block in &message.content {
@@ -264,12 +291,15 @@ fn translate_message(message: &Message, out: &mut Vec<Value>) {
         );
         obj.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }
-    // Round-trip reasoning content needed for tool-use continuity.
-    if let Some(r) = reasoning {
-        obj.insert("reasoning_content".to_string(), json!(r));
-    }
-    if let Some(sig) = reasoning_signature {
-        obj.insert("reasoning_signature".to_string(), json!(sig));
+    // Round-trip reasoning content needed for tool-use continuity, but only to
+    // endpoints that opt in to the non-standard fields.
+    if round_trip_reasoning {
+        if let Some(r) = reasoning {
+            obj.insert("reasoning_content".to_string(), json!(r));
+        }
+        if let Some(sig) = reasoning_signature {
+            obj.insert("reasoning_signature".to_string(), json!(sig));
+        }
     }
     out.push(Value::Object(obj));
 }
@@ -277,7 +307,8 @@ fn translate_message(message: &Message, out: &mut Vec<Value>) {
 fn role_str(role: Role) -> &'static str {
     match role {
         Role::System => "system",
-        Role::User => "user",
+        // A surfaced user shell run reads to the model as user content.
+        Role::User | Role::UserShell => "user",
         Role::Assistant => "assistant",
         Role::Tool => "tool",
     }
@@ -306,21 +337,25 @@ async fn classify_error_response(status: u16, response: reqwest::Response) -> Pr
 }
 
 fn quota_from_headers(headers: &reqwest::header::HeaderMap) -> QuotaInfo {
-    let retry_after = headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
-    let reset_at = headers
-        .get("x-ratelimit-reset")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok());
-    let limit_kind = headers
-        .get("x-ratelimit-limit-requests")
-        .map(|_| "requests".to_string());
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    // `retry-after` is delay-seconds or an HTTP-date; the documented
+    // per-window reset headers carry compact duration strings ("1s", "6m0s").
+    // Unparseable values degrade to absent metadata, never an error.
+    let retry_after = header("retry-after")
+        .and_then(|value| parse_retry_after(value, std::time::SystemTime::now()));
+    let requests_reset = header("x-ratelimit-reset-requests").and_then(parse_compact_duration);
+    let tokens_reset = header("x-ratelimit-reset-tokens").and_then(parse_compact_duration);
+    let (window_reset, limit_kind) = match (requests_reset, tokens_reset) {
+        (Some(requests), Some(tokens)) if tokens > requests => {
+            (Some(tokens), Some("tokens".to_string()))
+        }
+        (Some(requests), _) => (Some(requests), Some("requests".to_string())),
+        (None, Some(tokens)) => (Some(tokens), Some("tokens".to_string())),
+        (None, None) => (None, None),
+    };
     QuotaInfo {
-        retry_after,
-        reset_at,
+        retry_after: retry_after.or(window_reset),
+        reset_at: None,
         limit_kind,
         retryable: true,
         raw_provider_code: None,
@@ -370,13 +405,27 @@ where
 
 type EventQueue = VecDeque<Result<ModelEvent, ProviderError>>;
 
+/// The accumulation key for a streamed tool call: by `index` when the server
+/// provides one, otherwise by `id`, so a server that omits `index` on parallel
+/// tool calls cannot merge distinct calls into one accumulator.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ToolKey {
+    Index(u64),
+    Id(String),
+}
+
 /// Incremental decoder for OpenAI-style Server-Sent Events. Each `data:` line is
 /// a JSON chunk; tool-call arguments arrive in fragments and are accumulated by
-/// index before being emitted as a single assembled [`ModelEvent::ToolCall`].
+/// index (or id, when the server omits `index`) before being emitted as a single
+/// assembled [`ModelEvent::ToolCall`]. Raw bytes are buffered and only complete
+/// lines are decoded, so a multi-byte UTF-8 character split across network
+/// chunks is never corrupted.
 #[derive(Default)]
 struct SseDecoder {
-    buf: String,
-    tools: BTreeMap<u32, ToolAccum>,
+    buf: Vec<u8>,
+    thinking: InlineThinkingFilter,
+    tools: BTreeMap<ToolKey, ToolAccum>,
+    last_keyless: Option<ToolKey>,
     warned_finish_reasons: BTreeSet<String>,
     saw_finish_reason: bool,
     done: bool,
@@ -391,18 +440,26 @@ struct ToolAccum {
 
 impl SseDecoder {
     fn push(&mut self, bytes: &[u8], out: &mut EventQueue) {
-        self.buf.push_str(&String::from_utf8_lossy(bytes));
-        while let Some(pos) = self.buf.find('\n') {
-            let line: String = self.buf.drain(..=pos).collect();
+        // Buffer raw bytes; only complete lines are decoded. A multi-byte
+        // character cannot contain a newline byte, so splitting at `\n` never
+        // splits a character.
+        self.buf.extend_from_slice(bytes);
+        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line);
             self.process_line(line.trim(), out);
         }
     }
 
     fn finish(&mut self, out: &mut EventQueue) {
-        if !self.buf.trim().is_empty() {
-            let line = std::mem::take(&mut self.buf);
-            self.process_line(line.trim(), out);
+        if !self.buf.is_empty() {
+            let tail = std::mem::take(&mut self.buf);
+            let line = String::from_utf8_lossy(&tail);
+            if !line.trim().is_empty() {
+                self.process_line(line.trim(), out);
+            }
         }
+        self.flush_thinking(out);
         self.flush_tools(out);
         if !self.done {
             if self.saw_finish_reason {
@@ -416,8 +473,15 @@ impl SseDecoder {
         }
     }
 
+    fn flush_thinking(&mut self, out: &mut EventQueue) {
+        for event in self.thinking.finish() {
+            out.push_back(Ok(event));
+        }
+    }
+
     fn emit_done(&mut self, out: &mut EventQueue) {
         if !self.done {
+            self.flush_thinking(out);
             self.done = true;
             out.push_back(Ok(ModelEvent::Done));
         }
@@ -447,7 +511,7 @@ impl SseDecoder {
             let delta = &choice["delta"];
             if let Some(content) = delta["content"].as_str() {
                 if !content.is_empty() {
-                    for event in split_inline_thinking(content) {
+                    for event in self.thinking.push(content) {
                         out.push_back(Ok(event));
                     }
                 }
@@ -462,8 +526,8 @@ impl SseDecoder {
             }
             if let Some(tool_calls) = delta["tool_calls"].as_array() {
                 for tc in tool_calls {
-                    let index = u32::try_from(tc["index"].as_u64().unwrap_or(0)).unwrap_or(0);
-                    let acc = self.tools.entry(index).or_default();
+                    let key = self.tool_key(tc);
+                    let acc = self.tools.entry(key).or_default();
                     if let Some(id) = tc["id"].as_str() {
                         if !id.is_empty() {
                             acc.id = Some(id.to_string());
@@ -496,8 +560,28 @@ impl SseDecoder {
         }
     }
 
+    /// The accumulator key for one tool-call fragment. Servers normally send
+    /// `index`; when it is absent, fragments carrying an id key by id, and
+    /// id-less continuation fragments attach to the last id-keyed accumulator.
+    fn tool_key(&mut self, tc: &Value) -> ToolKey {
+        if let Some(index) = tc["index"].as_u64() {
+            return ToolKey::Index(index);
+        }
+        match tc["id"].as_str() {
+            Some(id) if !id.is_empty() => {
+                let key = ToolKey::Id(id.to_string());
+                self.last_keyless = Some(key.clone());
+                key
+            }
+            _ => self
+                .last_keyless
+                .clone()
+                .unwrap_or(ToolKey::Id(String::new())),
+        }
+    }
+
     fn flush_tools(&mut self, out: &mut EventQueue) {
-        for (_index, acc) in std::mem::take(&mut self.tools) {
+        for (_key, acc) in std::mem::take(&mut self.tools) {
             let Some(name) = acc.name else {
                 continue;
             };
@@ -754,5 +838,261 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n",
         ]);
         assert!(matches!(events.last(), Some(Ok(ModelEvent::Done))));
+    }
+
+    fn collected_text(events: &[Result<ModelEvent, ProviderError>]) -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ModelEvent::TextDelta(t)) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn collected_reasoning(events: &[Result<ModelEvent, ProviderError>]) -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ModelEvent::ReasoningDelta(t)) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn multibyte_character_split_across_network_chunks_survives() {
+        // "日" is e6 97 a5; split it mid-character across two pushes, with an
+        // emoji (f0 9f 8e 89) split 1+3 in a later line.
+        let line1 = "data: {\"choices\":[{\"delta\":{\"content\":\"日本\"}}]}\n".as_bytes();
+        let line2 = "data: {\"choices\":[{\"delta\":{\"content\":\"🎉\"}}]}\n".as_bytes();
+        let mut decoder = SseDecoder::default();
+        let mut out = EventQueue::new();
+        // The content payload starts at byte 39 of each line; splitting at 40
+        // lands inside the first multi-byte character.
+        let split1 = 40;
+        assert!(
+            std::str::from_utf8(&line1[..split1]).is_err(),
+            "split is mid-character"
+        );
+        decoder.push(&line1[..split1], &mut out);
+        decoder.push(&line1[split1..], &mut out);
+        let split2 = 41;
+        assert!(
+            std::str::from_utf8(&line2[..split2]).is_err(),
+            "split is mid-character"
+        );
+        decoder.push(&line2[..split2], &mut out);
+        decoder.push(&line2[split2..], &mut out);
+        decoder.push(b"data: [DONE]\n", &mut out);
+        decoder.finish(&mut out);
+        let events: Vec<_> = out.into_iter().collect();
+        let text = collected_text(&events);
+        assert_eq!(text, "\u{65e5}\u{672c}\u{1f389}");
+        assert!(!text.contains('\u{fffd}'), "no replacement characters");
+    }
+
+    #[test]
+    fn reasoning_block_spanning_many_deltas_stays_hidden() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<think>Let me look at\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\" the error handling\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"</think>The fix:\"}}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert_eq!(collected_text(&events), "The fix:");
+        assert_eq!(
+            collected_reasoning(&events),
+            "Let me look at the error handling"
+        );
+    }
+
+    #[test]
+    fn think_tag_split_across_deltas_is_recognized() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"a<thi\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"nk>hidden</thi\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"nk>b\"}}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert_eq!(collected_text(&events), "ab");
+        assert_eq!(collected_reasoning(&events), "hidden");
+    }
+
+    #[test]
+    fn stream_ending_inside_an_open_think_block_flushes_reasoning() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<think>cut off\"},\"finish_reason\":\"stop\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        assert_eq!(collected_text(&events), "");
+        assert_eq!(collected_reasoning(&events), "cut off");
+    }
+
+    #[test]
+    fn parallel_tool_calls_without_index_accumulate_by_id() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_a\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_b\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        let calls: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(ModelEvent::ToolCall { id, input_json, .. }) => {
+                    Some((id.clone(), input_json["path"].to_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls.len(), 2, "distinct calls must not merge: {calls:?}");
+        assert!(calls.iter().any(|(id, _)| id == "call_a"));
+        assert!(calls.iter().any(|(id, _)| id == "call_b"));
+    }
+
+    #[test]
+    fn indexless_continuation_fragments_attach_to_the_last_call() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_a\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"\\\"a.rs\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+        let call = events.iter().find_map(|e| match e {
+            Ok(ModelEvent::ToolCall { input_json, .. }) => Some(input_json.clone()),
+            _ => None,
+        });
+        assert_eq!(call.expect("one assembled call")["path"], "a.rs");
+    }
+
+    #[test]
+    fn official_api_does_not_send_nonstandard_reasoning_fields() {
+        use localpilot_core::{ContentBlock, Message, Role};
+        let provider = OpenAiProvider::new(
+            "openai",
+            "OpenAI",
+            SourceType::OfficialApi,
+            "https://api.openai.com/v1",
+            None,
+        );
+        let message = Message::new(
+            Role::Assistant,
+            vec![ContentBlock::Reasoning {
+                text: "deduce".to_string(),
+                signature: Some("sig-123".to_string()),
+                provider_metadata: None,
+            }],
+        );
+        let body = provider.build_body(&ModelRequest::new("m", vec![message]));
+        let serialized = body.to_string();
+        assert!(!serialized.contains("reasoning_content"));
+        assert!(!serialized.contains("reasoning_signature"));
+    }
+
+    #[test]
+    fn reasoning_round_trip_option_overrides_the_source_type_default() {
+        use localpilot_core::{ContentBlock, Message, Role};
+        let mut options = IndexMap::new();
+        options.insert("reasoning_round_trip".to_string(), json!(true));
+        let provider = OpenAiProvider::new(
+            "openai",
+            "OpenAI",
+            SourceType::OfficialApi,
+            "https://api.openai.com/v1",
+            None,
+        )
+        .with_default_options(options);
+        let message = Message::new(
+            Role::Assistant,
+            vec![ContentBlock::Reasoning {
+                text: "deduce".to_string(),
+                signature: None,
+                provider_metadata: None,
+            }],
+        );
+        let body = provider.build_body(&ModelRequest::new("m", vec![message]));
+        assert!(body.to_string().contains("reasoning_content"));
+        // The switch itself never reaches the wire.
+        assert!(body.get("reasoning_round_trip").is_none());
+    }
+
+    #[test]
+    fn late_system_message_keeps_its_position_on_the_wire() {
+        use localpilot_core::{Message, Role};
+        let provider = OpenAiProvider::new(
+            "local",
+            "Local",
+            SourceType::LocalServer,
+            "http://localhost:1234/v1",
+            None,
+        );
+        let messages = vec![
+            Message::text(Role::System, "be terse"),
+            Message::text(Role::User, "hi"),
+            Message::text(Role::Assistant, "hello"),
+            Message::text(Role::System, "project context: uses tokio"),
+            Message::text(Role::User, "continue"),
+        ];
+        let body = provider.build_body(&ModelRequest::new("m", messages));
+        let wire = body["messages"].as_array().unwrap();
+        let roles: Vec<&str> = wire.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(
+            roles,
+            vec!["system", "user", "assistant", "system", "user"],
+            "a late system message is not reordered"
+        );
+        assert_eq!(wire[3]["content"], "project context: uses tokio");
+    }
+
+    #[test]
+    fn explicit_reasoning_effort_reaches_the_wire_and_overrides_defaults() {
+        let mut options = IndexMap::new();
+        options.insert("reasoning_effort".to_string(), json!("low"));
+        let provider = OpenAiProvider::new(
+            "local",
+            "Local",
+            SourceType::LocalServer,
+            "http://localhost:1234/v1",
+            None,
+        )
+        .with_default_options(options);
+        let request = ModelRequest::new("m", Vec::new())
+            .with_reasoning_effort(Some(crate::request::ReasoningEffort::High));
+        let body = provider.build_body(&request);
+        assert_eq!(body["reasoning_effort"], "high");
+        // Without an explicit request value the option default stands.
+        let body = provider.build_body(&ModelRequest::new("m", Vec::new()));
+        assert_eq!(body["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn quota_headers_parse_duration_string_resets() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-reset-requests", "1s".parse().unwrap());
+        headers.insert("x-ratelimit-reset-tokens", "6m0s".parse().unwrap());
+        let quota = quota_from_headers(&headers);
+        // The longer window is the conservative wait.
+        assert_eq!(quota.retry_after, Some(Duration::from_secs(360)));
+        assert_eq!(quota.limit_kind.as_deref(), Some("tokens"));
+    }
+
+    #[test]
+    fn quota_headers_prefer_retry_after_seconds() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "30".parse().unwrap());
+        headers.insert("x-ratelimit-reset-requests", "1s".parse().unwrap());
+        let quota = quota_from_headers(&headers);
+        assert_eq!(quota.retry_after, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn unparseable_quota_headers_degrade_to_absent_metadata() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "soon".parse().unwrap());
+        headers.insert("x-ratelimit-reset-requests", "later".parse().unwrap());
+        let quota = quota_from_headers(&headers);
+        assert_eq!(quota.retry_after, None);
+        assert_eq!(quota.limit_kind, None);
     }
 }

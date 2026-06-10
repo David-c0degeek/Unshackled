@@ -1,4 +1,4 @@
-﻿# Security and Privacy
+# Security and Privacy
 
 ## Security Model
 
@@ -83,6 +83,17 @@ Default decisions:
 | privileged | ask with explicit warning | deny |
 | unknown | ask | deny |
 
+Wrapper commands are never auto-allowed. A shell or interpreter invocation that
+executes an embedded command the classifier cannot see into — `bash`/`sh`/
+`zsh`/`dash`/`ksh -c …`, `env`-prefixed commands, `xargs`, `nohup`, `timeout`,
+interpreter `-c`/`-e` one-liners (python, node, perl, ruby), and their
+equivalents reachable on Windows (git-bash, WSL) — classifies as `unknown` at
+best, on every platform. Destructive flag forms of otherwise project-write
+commands escalate: `git reset --hard`, `git clean -f`, and `git checkout`/
+`git restore` against pathspecs classify as `destructive`, so a raw shell
+command never faces a weaker gate than the purpose-built tool for the same
+effect.
+
 ## Discovered Tooling
 
 The harness quality gate discovers language-specific check commands from the
@@ -116,15 +127,62 @@ deliberately. Profiles apply in both agent mode and harness mode.
 
 Rules:
 
+- **The allowlist is floor-aware.** Under `relaxed`, an allowlisted tool is
+  auto-approved only for low-risk effects: read-only, project-write, and
+  network command classes, in-workspace non-secret file reads, and
+  in-workspace writes. This includes non-interactive runs — it is how the
+  ratified quality gate executes headless (ADR-0009). Destructive,
+  privileged, unknown, and external-write commands, secret-like reads, and
+  out-of-workspace paths keep their gate regardless of the allowlist, in
+  every mode. Allowlisting `run_shell` stops prompt fatigue for routine
+  commands; it does not grant `sudo` or `rm -rf`.
 - `bypass` is never the default. It must be set explicitly, through a launch flag
   or config, and the active profile is always shown in the footer/status output.
-- `bypass` does not silently disable redaction, logging, or the workspace
-  boundary; disabling those requires separate explicit settings.
+- `bypass` does not silently disable redaction or logging; disabling those
+  requires separate explicit settings.
+- **Bypass keeps the workspace boundary for path effects only.** The file
+  tools' read/write effects carry path information, and an out-of-workspace
+  path is still denied under bypass. Shell commands carry no path
+  information: bypass auto-allows every command class, and a command's own
+  file access is not contained (its working directory is the workspace root,
+  nothing more). Treat bypass as full shell access for the model.
 - Harness rule verdicts still apply on top of the permission profile. A profile
   controls prompting, not the harness correctness gates.
 
 Bypass removes the main safety net against model-initiated destructive actions.
 It should be used only in disposable or sandboxed environments.
+
+## Reliability Contract — Permission Invariants
+
+These invariants are the permission half of the reliability contract
+(ADR-0010): the explicit guarantees that make unattended operation
+trustworthy. Each is pinned by a named test; a change that breaks the test is
+a contract change and needs an ADR, not a patch.
+
+1. **No command reachable via `run_shell` faces a weaker gate than the
+   equivalent builtin tool.** Destructive flag/pathspec forms of git commands
+   classify `destructive`, matching the purpose-built `git_restore`.
+   Enforced by `destructive_git_flags_escalate_past_project_write`
+   (`localpilot-sandbox`).
+2. **Allowlists never lift destructive, privileged, or unknown gating.** The
+   relaxed-profile allowlist relaxes *ask* to *allow* only below the risk
+   floor. Enforced by
+   `allowlist_never_lifts_destructive_privileged_or_unknown_commands` and
+   `allowlist_never_lifts_secret_reads_or_out_of_workspace_paths`
+   (`localpilot-sandbox`), and end-to-end by
+   `allowlisted_run_shell_still_prompts_for_destructive_commands`
+   (`localpilot-tools`).
+3. **Wrapper commands never classify below `unknown`** on any platform.
+   Enforced by `shell_wrappers_never_classify_below_unknown_on_any_platform`
+   and the `wrappers_are_never_read_only` property (`localpilot-sandbox`).
+4. **Approval prompts state what is being approved.** Every tool with side
+   effects supplies the concrete target (command line, path, query) in the
+   prompt detail. Enforced by
+   `run_shell_approval_prompt_shows_the_full_command_line`
+   (`localpilot-tools`).
+
+The loop half of the contract (tool-result pairing, transcript fidelity) lives
+in [`docs/06`](06-harness-spec.md) §Reliability Contract.
 
 ## Platform Policy (All Tier-1)
 

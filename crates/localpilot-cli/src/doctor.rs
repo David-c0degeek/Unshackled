@@ -1,4 +1,4 @@
-﻿//! `localpilot doctor` — environment diagnostics.
+//! `localpilot doctor` — environment diagnostics.
 //!
 //! Data gathering ([`report`]) is deliberately separated from rendering
 //! ([`render`]) so the human-readable output is deterministic and testable
@@ -38,6 +38,10 @@ pub struct ProviderStatus {
     pub name: String,
     pub credential_env: String,
     pub credential_present: bool,
+    /// The provider's default model, when configured.
+    pub model: Option<String>,
+    /// The model's context window in tokens, when configured.
+    pub context_window: Option<u64>,
 }
 
 /// Whether an external tool the agent can use was found on `PATH`.
@@ -112,7 +116,16 @@ pub fn render(report: &DoctorReport) -> String {
         } else {
             "not set"
         };
-        let _ = writeln!(s, "  {}: credential {} {state}", p.name, p.credential_env);
+        let model = p.model.as_deref().unwrap_or("(none)");
+        let window = p
+            .context_window
+            .map(|w| format!("{w} tokens"))
+            .unwrap_or_else(|| "unknown".to_string());
+        let _ = writeln!(
+            s,
+            "  {}: credential {} {state}; model {model}; context window {window}",
+            p.name, p.credential_env
+        );
     }
     let _ = writeln!(s);
 
@@ -192,6 +205,8 @@ fn providers() -> Vec<ProviderStatus> {
         name: name.to_string(),
         credential_env: env.to_string(),
         credential_present: credential_present(env),
+        model: None,
+        context_window: None,
     })
     .collect()
 }
@@ -219,12 +234,16 @@ fn configured_providers() -> Option<Vec<ProviderStatus>> {
                         name: format!("{id} ({})", entry.kind),
                         credential_env: env.to_string(),
                         credential_present: credential_present(env),
+                        model: entry.model.clone(),
+                        context_window: entry.context_window,
                     };
                 }
                 ProviderStatus {
                     name: format!("{id} ({})", entry.kind),
                     credential_env: "(none required)".to_string(),
                     credential_present: true,
+                    model: entry.model.clone(),
+                    context_window: entry.context_window,
                 }
             })
             .collect(),
@@ -329,11 +348,15 @@ mod tests {
                     name: "local".to_string(),
                     credential_env: "LOCALPILOT_LOCAL_API_KEY".to_string(),
                     credential_present: false,
+                    model: None,
+                    context_window: None,
                 },
                 ProviderStatus {
                     name: "openai".to_string(),
                     credential_env: "OPENAI_API_KEY".to_string(),
                     credential_present: true,
+                    model: None,
+                    context_window: None,
                 },
             ],
             tools: vec![

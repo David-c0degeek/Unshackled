@@ -24,6 +24,7 @@ fn ctx(ws: &Workspace, interactivity: Interactivity, trusted: bool) -> ToolConte
         workspace: ws,
         interactivity,
         trusted,
+        retention: None,
     }
 }
 
@@ -85,7 +86,7 @@ async fn unknown_tool_returns_an_error_result_not_a_panic() {
 #[test]
 fn every_builtin_generates_a_schema() {
     let registry = ToolRegistry::with_builtins();
-    assert_eq!(registry.names().len(), 15);
+    assert_eq!(registry.names().len(), 17);
     for (name, schema) in registry.schemas() {
         assert!(schema.is_object(), "{name} produced a non-object schema");
     }
@@ -498,4 +499,304 @@ async fn bypass_still_redacts_output_and_keeps_the_workspace_boundary() {
     assert!(escape.is_error);
     assert!(escape.output.contains("permission denied"));
     assert!(!outside_path.exists());
+}
+
+/// An approver that records each request it is consulted for, then approves.
+struct RecordingApprover {
+    requests: std::sync::Mutex<Vec<localpilot_sandbox::PermissionRequest>>,
+}
+
+impl RecordingApprover {
+    fn new() -> Self {
+        Self {
+            requests: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    fn seen(&self) -> Vec<localpilot_sandbox::PermissionRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl localpilot_sandbox::Approver for RecordingApprover {
+    fn approve<'a>(
+        &'a self,
+        request: &'a localpilot_sandbox::PermissionRequest,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + 'a>> {
+        self.requests.lock().unwrap().push(request.clone());
+        Box::pin(async { true })
+    }
+}
+
+#[tokio::test]
+async fn run_shell_approval_prompt_shows_the_full_command_line() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+    let approver = RecordingApprover::new();
+
+    // A destructive command asks; the prompt must carry program + args.
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "run_shell",
+        json!({ "program": "rm", "args": ["-rf", "build"] }),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty(), "a destructive command must prompt");
+    for request in &seen {
+        assert_eq!(
+            request.detail, "rm -rf build",
+            "the user must see what they are approving"
+        );
+    }
+}
+
+#[tokio::test]
+async fn write_file_approval_prompt_shows_the_path() {
+    let (_dir, ws) = workspace_with(&[("existing.txt", "old")]);
+    let registry = ToolRegistry::with_builtins();
+    // Untrusted workspace so the write asks instead of auto-allowing.
+    let c = ctx(&ws, Interactivity::Interactive, false);
+    let approver = RecordingApprover::new();
+
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "write_file",
+        json!({ "path": "existing.txt", "content": "new" }),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty());
+    assert_eq!(seen[0].detail, "existing.txt");
+}
+
+#[tokio::test]
+async fn allowlisted_run_shell_still_prompts_for_destructive_commands() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+    let relaxed = PermissionEngine::new(Profile::Relaxed, vec!["run_shell".to_string()]);
+
+    // Destructive: the allowlist must not lift the gate — the approver is
+    // consulted.
+    let approver = RecordingApprover::new();
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "run_shell",
+        json!({ "program": "rm", "args": ["-rf", "build"] }),
+    );
+    let _ = registry.dispatch(&call, &c, &relaxed, &approver).await;
+    assert!(
+        !approver.seen().is_empty(),
+        "allowlisting run_shell must not auto-approve destructive commands"
+    );
+
+    // A wrapped command never classifies below Unknown, so it prompts too.
+    let approver = RecordingApprover::new();
+    let call = ToolCall::new(
+        ToolUseId::from("c2"),
+        "run_shell",
+        json!({ "program": "bash", "args": ["-c", "echo hi"] }),
+    );
+    let _ = registry.dispatch(&call, &c, &relaxed, &approver).await;
+    assert!(
+        !approver.seen().is_empty(),
+        "shell wrappers are never auto-allowed"
+    );
+}
+
+#[tokio::test]
+async fn write_file_refuses_to_clobber_a_binary_file_when_overwrite_is_false() {
+    let dir = tempfile::tempdir().unwrap();
+    // A non-UTF-8 target: read_to_string fails on it, but it exists.
+    std::fs::write(dir.path().join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+    let ws = Workspace::new(dir.path()).unwrap();
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "write_file",
+        json!({ "path": "blob.bin", "content": "text", "overwrite": false }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(result.is_error, "{}", result.output);
+    assert!(result.output.contains("exists and overwrite is false"));
+    // The binary content is untouched.
+    assert_eq!(
+        std::fs::read(dir.path().join("blob.bin")).unwrap(),
+        vec![0u8, 159, 146, 150]
+    );
+}
+
+/// An in-memory retention sink for spill tests.
+#[derive(Default)]
+struct MemoryRetention {
+    entries: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl localpilot_tools::OutputRetention for MemoryRetention {
+    fn retain(&self, id: &str, output: &str) -> Result<(), String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), output.to_string());
+        Ok(())
+    }
+    fn fetch(&self, id: &str) -> Result<Option<String>, String> {
+        Ok(self.entries.lock().unwrap().get(id).cloned())
+    }
+}
+
+#[tokio::test]
+async fn apply_patch_applies_create_update_and_delete_atomically() {
+    let (_dir, ws) = workspace_with(&[
+        ("src/lib.rs", "fn old() {}\nfn keep() {}\n"),
+        ("obsolete.txt", "bye"),
+    ]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "update", "path": "src/lib.rs", "hunks": [
+                { "old_text": "fn old() {}", "new_text": "fn renamed() {}" }
+            ]},
+            { "action": "create", "path": "src/new.rs", "content": "fn fresh() {}\n" },
+            { "action": "delete", "path": "obsolete.txt" }
+        ]}),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", result.output);
+    let lib = std::fs::read_to_string(ws.root().join("src/lib.rs")).unwrap();
+    assert!(lib.contains("fn renamed()"));
+    assert!(std::fs::read_to_string(ws.root().join("src/new.rs"))
+        .unwrap()
+        .contains("fn fresh()"));
+    assert!(!ws.root().join("obsolete.txt").exists());
+}
+
+#[tokio::test]
+async fn apply_patch_rejects_the_whole_patch_when_one_hunk_misses() {
+    let (_dir, ws) = workspace_with(&[("a.txt", "alpha\n")]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "create", "path": "b.txt", "content": "beta\n" },
+            { "action": "update", "path": "a.txt", "hunks": [
+                { "old_text": "does not exist", "new_text": "x" }
+            ]}
+        ]}),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.output.contains("operation 2") && result.output.contains("was not found"),
+        "the error names the failing operation: {}",
+        result.output
+    );
+    // Nothing was applied: the create did not happen either.
+    assert!(!ws.root().join("b.txt").exists());
+}
+
+#[tokio::test]
+async fn apply_patch_approval_detail_previews_the_operations() {
+    let (_dir, ws) = workspace_with(&[("a.txt", "alpha\n")]);
+    let registry = ToolRegistry::with_builtins();
+    // Untrusted workspace: writes ask, so the approver sees the detail.
+    let c = ctx(&ws, Interactivity::Interactive, false);
+    let approver = RecordingApprover::new();
+
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "update", "path": "a.txt", "hunks": [
+                { "old_text": "alpha", "new_text": "beta" }
+            ]}
+        ]}),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty());
+    assert!(
+        seen[0].detail.contains("update a.txt (1 hunks)"),
+        "detail: {}",
+        seen[0].detail
+    );
+}
+
+#[tokio::test]
+async fn oversized_output_is_bounded_and_spilled_to_retention() {
+    let big = "line of output\n".repeat(4000); // ~60 KB, beyond the context bound
+    let (_dir, ws) = workspace_with(&[("big.txt", &big)]);
+    let registry = ToolRegistry::with_builtins();
+    let retention = MemoryRetention::default();
+    let c = ToolContext {
+        workspace: &ws,
+        interactivity: Interactivity::Interactive,
+        trusted: true,
+        retention: Some(&retention),
+    };
+
+    let result = dispatch(
+        &registry,
+        "read_file",
+        json!({ "path": "big.txt" }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", result.output);
+    assert!(
+        result.output.len() < big.len() / 2,
+        "context output is bounded"
+    );
+    assert!(result.output.contains("output truncated"));
+    assert!(result.output.contains("read_tool_output"));
+    // Head and tail both survive.
+    assert!(result.output.starts_with("tool: read_file"));
+    assert!(result.output.trim_end().ends_with("line of output"));
+
+    // The full output is retained under the call id and fetchable.
+    let fetched = dispatch(
+        &registry,
+        "read_tool_output",
+        json!({ "id": "c1", "start_line": 1, "end_line": 2 }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+    assert!(!fetched.is_error, "{}", fetched.output);
+    assert!(fetched.output.contains("line of output"));
 }

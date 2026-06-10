@@ -669,9 +669,16 @@ async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() 
     let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
     assert_eq!(reason, StopReason::Done);
 
+    // The truncated text is never persisted as a finished reply; the repair
+    // prompt that shaped the retry *is* persisted, marked synthetic, so the
+    // stored transcript equals the history the model saw.
     let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
-    assert_eq!(transcript.len(), 2);
-    let assistant_text = transcript[1]
+    assert_eq!(transcript.len(), 3);
+    assert!(
+        transcript[1].is_synthetic(),
+        "the repair prompt is persisted and marked synthetic"
+    );
+    let assistant_text = transcript[2]
         .content
         .iter()
         .find_map(|block| match block {
@@ -680,6 +687,12 @@ async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() 
         })
         .unwrap();
     assert_eq!(assistant_text, "The complete answer.");
+    assert!(!transcript
+        .iter()
+        .any(|message| message.content.iter().any(|block| matches!(
+            block,
+            localpilot_core::ContentBlock::Text { text } if text.contains("Let me start")
+        ))));
     assert!(drain(&mut rx)
         .iter()
         .any(|event| matches!(event, RuntimeEvent::Recovery { .. })));
@@ -840,4 +853,128 @@ async fn loop_stops_at_the_tool_call_cap() {
 
     let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
     assert_eq!(reason, StopReason::MaxToolCalls);
+}
+
+#[tokio::test]
+async fn transcript_is_derivable_from_the_event_log() {
+    // A representative session: a denied destructive tool call, a malformed
+    // stream that triggers recovery (and a synthetic repair prompt), context
+    // pressure that forces compaction, then a clean answer.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call(
+                "c1",
+                "run_shell",
+                json!({ "program": "rm", "args": ["-rf", "x"] }),
+            )
+            .malformed()
+            .text("recovered and done"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig {
+            interactivity: Interactivity::NonInteractive,
+            context_token_limit: 600,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    // A large prompt pushes the history over the small limit so compaction
+    // runs while shaping the request.
+    let prompt = format!("clean up {}", "context ".repeat(500));
+    let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+
+    let session = h.runtime.session_id();
+    let events = h.store.read_events(session).unwrap();
+
+    // The transcript rebuilt from events equals the stored transcript,
+    // including the synthetic repair prompt.
+    let rebuilt = localpilot_store::transcript_from_events(&events);
+    let stored = h.store.read_transcript(session).unwrap();
+    assert_eq!(rebuilt, stored);
+    assert!(stored.iter().any(localpilot_core::Message::is_synthetic));
+
+    // The log carries the full audit trail for this session's shape.
+    use localpilot_store::SessionEventKind as Kind;
+    let has = |predicate: &dyn Fn(&Kind) -> bool| events.iter().any(|event| predicate(&event.kind));
+    assert!(has(&|kind| matches!(kind, Kind::SessionOpened { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::TurnStarted { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::ToolStarted { .. })));
+    assert!(has(&|kind| matches!(
+        kind,
+        Kind::ToolFinished { is_error: true, .. }
+    )));
+    assert!(has(&|kind| matches!(kind, Kind::RecoveryDiagnostic { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::Compacted { .. })));
+    assert!(has(&|kind| matches!(
+        kind,
+        Kind::Message {
+            origin: localpilot_store::MessageOrigin::Synthetic { .. },
+            ..
+        }
+    )));
+    assert!(has(&|kind| matches!(kind, Kind::TurnEnded { .. })));
+
+    // The chain is well-formed: every event descends from its predecessor.
+    for pair in events.windows(2) {
+        assert_eq!(pair[1].parent_id, Some(pair[0].id));
+    }
+}
+
+#[tokio::test]
+async fn user_shell_runs_are_auditable_and_context_exclusion_works() {
+    let provider = Arc::new(FakeProvider::new().text("ok"));
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig::default(),
+        Profile::Default,
+    );
+    let session = h.runtime.session_id();
+
+    // An excluded run: permission-gated, in the event log, not in context.
+    let excluded = h
+        .runtime
+        .run_user_shell("git", &["--version".to_string()], true)
+        .await;
+    assert!(!excluded.is_error, "{}", excluded.output);
+    assert!(h.store.read_transcript(session).unwrap().is_empty());
+
+    // An included run lands in the transcript as a shell-role message.
+    let included = h
+        .runtime
+        .run_user_shell("git", &["--version".to_string()], false)
+        .await;
+    assert!(!included.is_error, "{}", included.output);
+    let transcript = h.store.read_transcript(session).unwrap();
+    assert_eq!(transcript.len(), 1);
+    assert_eq!(transcript[0].role, localpilot_core::Role::UserShell);
+
+    // Both runs are auditable from the event log, and the transcript is still
+    // exactly the Message events.
+    let events = h.store.read_events(session).unwrap();
+    let shell_runs = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                localpilot_store::SessionEventKind::ToolFinished { name, .. } if name == "run_shell"
+            )
+        })
+        .count();
+    assert_eq!(shell_runs, 2);
+    assert_eq!(
+        localpilot_store::transcript_from_events(&events),
+        transcript
+    );
+
+    // The next model turn sees the included run but not the excluded one.
+    let reason = h.runtime.run_turn("hi", &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+    let request = provider.requests().pop().unwrap();
+    let roles: Vec<_> = request.messages.iter().map(|m| m.role).collect();
+    assert!(roles.contains(&localpilot_core::Role::UserShell));
 }

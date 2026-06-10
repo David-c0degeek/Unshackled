@@ -140,6 +140,14 @@ pub async fn run_chat(
     .cloned()
     .ok_or_else(|| anyhow::anyhow!("no provider is configured"))?;
 
+    // The real context window: per-provider config first, then best-effort
+    // discovery from the local server's model listing. Failure means falling
+    // back to the configured global budget, never an error.
+    let mut context_window = provider.declaration().max_context_tokens;
+    if context_window.is_none() {
+        context_window = discovered_window(&config, provider_id, &model).await;
+    }
+
     // Ask-gated actions suspend the turn and prompt in the TUI; the user's
     // y/n answer flows back through this channel to the permission engine.
     let (approval_tx, mut approval_rx) = mpsc::unbounded_channel::<ApprovalCall>();
@@ -157,11 +165,17 @@ pub async fn run_chat(
             model: model.to_string(),
             interactivity: Interactivity::Interactive,
             trusted: profile == Profile::Bypass,
-            context_token_limit: config.harness.context_token_limit,
+            context_token_limit: localpilot_harness::effective_context_limit(
+                context_window,
+                config.harness.context_token_limit,
+            ),
             ..SessionConfig::default()
         },
         Vec::new(),
     );
+    // Relevant accepted LocalMind memory is contributed per turn through the
+    // context-hook fabric.
+    crate::context_inject::register(&cwd, &mut runtime);
 
     let header = Header {
         version: env!("LOCALPILOT_VERSION").to_string(),
@@ -245,9 +259,6 @@ async fn event_loop(
                             run_slash(terminal, state, runtime, approval_rx, &host, action).await?;
                         } else {
                             state.apply(UiEvent::UserMessage(shown));
-                            // Seed relevant accepted memory for this prompt when
-                            // LocalMind has a match.
-                            crate::context_inject::seed(host.cwd, runtime, &prompt);
                             state.busy = true;
                             let outcome =
                                 run_turn(terminal, state, runtime, approval_rx, &prompt).await;
@@ -287,6 +298,94 @@ async fn run_slash(
             runtime.set_permission_profile(sandbox_profile(profile), Vec::new());
         }
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::NewSession => {
+            runtime.start_new_session();
+            state.clear_conversation_view();
+            state.header.session_id = runtime.session_id().to_string();
+            state.apply(UiEvent::Notice(format!(
+                "started new session {}",
+                runtime.session_id()
+            )));
+        }
+        action @ (SlashAction::Fork | SlashAction::CloneSession) => {
+            let mark_fork = matches!(action, SlashAction::Fork);
+            match runtime.fork_session(mark_fork) {
+                Ok(id) => {
+                    state.header.session_id = id.to_string();
+                    let verb = if mark_fork { "forked" } else { "cloned" };
+                    state.apply(UiEvent::Notice(format!("{verb} into session {id}")));
+                }
+                Err(error) => {
+                    state.apply(UiEvent::Notice(format!("branch failed: {error}")));
+                }
+            }
+        }
+        SlashAction::Tree => match runtime.store().read_events(runtime.session_id()) {
+            Ok(events) => {
+                for line in render_session_tree(&events) {
+                    state.apply(UiEvent::Notice(line));
+                }
+            }
+            Err(error) => {
+                state.apply(UiEvent::Notice(format!("event log unreadable: {error}")));
+            }
+        },
+        SlashAction::Sessions => match runtime.store().list_sessions() {
+            Ok(mut sessions) => {
+                sessions.sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix));
+                if sessions.is_empty() {
+                    state.apply(UiEvent::Notice("no sessions in this workspace".to_string()));
+                }
+                for entry in sessions.into_iter().take(10) {
+                    let current = if entry.id == runtime.session_id() {
+                        " (current)"
+                    } else {
+                        ""
+                    };
+                    state.apply(UiEvent::Notice(format!(
+                        "{} — {} message(s){current}",
+                        entry.id, entry.message_count
+                    )));
+                }
+            }
+            Err(error) => {
+                state.apply(UiEvent::Notice(format!(
+                    "session index unreadable: {error}"
+                )));
+            }
+        },
+        SlashAction::LoadSession(id) => match id.parse::<localpilot_core::SessionId>() {
+            Ok(session) => match runtime.load_session(session) {
+                Ok(()) => {
+                    state.clear_conversation_view();
+                    state.header.session_id = session.to_string();
+                    state.apply(UiEvent::Notice(format!(
+                        "resumed session {session}; current profile and trust apply"
+                    )));
+                }
+                Err(error) => {
+                    state.apply(UiEvent::Notice(format!("resume failed: {error}")));
+                }
+            },
+            Err(_) => {
+                state.apply(UiEvent::Notice(format!("not a session id: {id}")));
+            }
+        },
+        SlashAction::SetEffort(level) => match localpilot_llm::ReasoningEffort::parse(&level) {
+            Some(effort) => {
+                runtime.set_reasoning_effort(Some(effort));
+                state.footer.effort = Some(effort.as_str().to_string());
+                state.apply(UiEvent::Notice(format!(
+                    "reasoning effort set to {}",
+                    effort.as_str()
+                )));
+            }
+            None => {
+                state.apply(UiEvent::Notice(format!(
+                    "invalid effort {level:?}; use minimal, low, medium, or high"
+                )));
+            }
+        },
         SlashAction::Clear => {
             runtime.clear_conversation();
             state.clear_conversation_view();
@@ -401,6 +500,7 @@ async fn run_harness_command(
         &mut rx,
         &cancel,
         started,
+        None,
         operation,
     )
     .await;
@@ -423,6 +523,9 @@ async fn run_turn(
     let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
     let cancel = CancellationToken::new();
     let started = std::time::Instant::now();
+    // Input submitted while the turn runs becomes steering: admitted at the
+    // next safe provider-turn boundary instead of being swallowed.
+    let steer = runtime.steer_queue();
     let turn = async {
         let _ = runtime.run_turn(prompt, &events, &cancel).await;
         Ok(())
@@ -434,11 +537,13 @@ async fn run_turn(
         &mut rx,
         &cancel,
         started,
+        Some(&steer),
         turn,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // the REPL event pump genuinely threads these
 async fn drive_runtime_operation<F, T>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     state: &mut AppState,
@@ -446,6 +551,7 @@ async fn drive_runtime_operation<F, T>(
     rx: &mut broadcast::Receiver<RuntimeEvent>,
     cancel: &CancellationToken,
     started: std::time::Instant,
+    steer: Option<&localpilot_harness::SteerQueue>,
     operation: F,
 ) -> anyhow::Result<T>
 where
@@ -470,7 +576,7 @@ where
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
-                    pending = resolve_event(state, pending, event::read()?, cancel);
+                    pending = resolve_event(state, pending, event::read()?, cancel, steer);
                 }
                 terminal.draw(|frame| render(frame, state))?;
             }
@@ -522,6 +628,7 @@ fn resolve_event(
     pending: Option<oneshot::Sender<bool>>,
     event: Event,
     cancel: &CancellationToken,
+    steer: Option<&localpilot_harness::SteerQueue>,
 ) -> Option<oneshot::Sender<bool>> {
     if let Some(reply) = pending {
         let Event::Key(key) = event else {
@@ -556,9 +663,23 @@ fn resolve_event(
                     cancel.cancel();
                 } else if is_newline(key, &state.input) {
                     state.insert_input_newline();
-                } else if !is_submit(key, &state.input)
-                    && !matches!(key.code, KeyCode::Enter | KeyCode::Esc)
-                {
+                } else if is_submit(key, &state.input) {
+                    // Submitting while a turn runs queues steering input,
+                    // admitted at the next safe provider-turn boundary.
+                    if let Some(steer) = steer {
+                        if !state.input.trim().is_empty() {
+                            let shown = std::mem::take(&mut state.input);
+                            state.input_cursor = 0;
+                            let prompt = state.expand_pastes(&shown);
+                            state.pastes.clear();
+                            steer.push(prompt);
+                            state.apply(UiEvent::UserMessage(shown));
+                            state.apply(UiEvent::Notice(
+                                "steering queued for the next safe boundary".to_string(),
+                            ));
+                        }
+                    }
+                } else if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
                     if let Some(mapped) = map_key(key) {
                         handle_input(state, AppInput::Key(mapped));
                     }
@@ -671,6 +792,51 @@ fn map_event(event: RuntimeEvent, elapsed_secs: f64) -> Option<UiEvent> {
     }
 }
 
+/// Render the session's durable event log as an indented tree of lifecycle
+/// landmarks: opens, turns, steps, branch closures, and forks.
+fn render_session_tree(events: &[localpilot_store::SessionEvent]) -> Vec<String> {
+    use localpilot_store::SessionEventKind as Kind;
+    let mut lines = Vec::new();
+    let mut in_step = false;
+    for event in events {
+        match &event.kind {
+            Kind::SessionOpened { reason } => {
+                in_step = false;
+                lines.push(format!("* session opened ({reason:?})").to_lowercase());
+            }
+            Kind::StepStarted {
+                number,
+                description,
+            } => {
+                in_step = true;
+                lines.push(format!("* step {number}: {description}"));
+            }
+            Kind::StepCompleted {
+                number, attempts, ..
+            } => {
+                in_step = false;
+                lines.push(format!("* step {number} completed ({attempts} attempt(s))"));
+            }
+            Kind::BranchClosed { summary } => {
+                lines.push(format!("  x branch closed: {}", summary.title));
+            }
+            Kind::BranchForked { .. } => {
+                lines.push("  > forked from an earlier point".to_string());
+            }
+            Kind::TurnStarted { model } => {
+                let indent = if in_step { "    " } else { "  " };
+                lines.push(format!("{indent}- turn ({model})"));
+            }
+            Kind::Cancelled => lines.push("  ! cancelled".to_string()),
+            _ => {}
+        }
+    }
+    if lines.is_empty() {
+        lines.push("event log is empty".to_string());
+    }
+    lines
+}
+
 fn ui_profile(profile: Profile) -> UiProfile {
     match profile {
         Profile::Default => UiProfile::Default,
@@ -685,6 +851,34 @@ fn sandbox_profile(profile: UiProfile) -> Profile {
         UiProfile::Relaxed => Profile::Relaxed,
         UiProfile::Bypass => Profile::Bypass,
     }
+}
+
+/// Best-effort context window for `model` from the provider's own model
+/// listing, when the provider speaks the OpenAI-compatible protocol and a base
+/// URL is known. Silent on failure: discovery is metadata, not a gate.
+async fn discovered_window(
+    config: &localpilot_config::Config,
+    provider_id: Option<&str>,
+    model: &str,
+) -> Option<u64> {
+    let id = provider_id.unwrap_or(&config.provider.default);
+    let entry = config.providers.get(id)?;
+    if entry.kind == "anthropic" {
+        return None;
+    }
+    let base_url = entry.base_url.clone().or_else(|| {
+        std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })?;
+    let credential = config.resolve_credential(id);
+    let models = localpilot_llm::discover_models(&base_url, credential.as_ref())
+        .await
+        .ok()?;
+    models
+        .into_iter()
+        .find(|m| m.id == model)
+        .and_then(|m| m.context_window)
 }
 
 fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {

@@ -1,4 +1,4 @@
-﻿//! Provider runtime for LocalPilot.
+//! Provider runtime for LocalPilot.
 //!
 //! Connects the agent to models behind one object-safe [`ModelProvider`] trait
 //! that hides API differences behind a single internal stream contract while
@@ -9,9 +9,11 @@
 #![forbid(unsafe_code)]
 
 mod anthropic;
+mod discovery;
 mod error;
 mod event;
 mod fake;
+mod headers;
 mod openai;
 mod provider;
 mod registry;
@@ -19,6 +21,7 @@ mod request;
 mod retry;
 
 pub use anthropic::AnthropicProvider;
+pub use discovery::{discover_models, DiscoveredModel};
 pub use error::{ProviderError, QuotaInfo};
 pub use event::{ModelEvent, ModelEventStream};
 pub use fake::FakeProvider;
@@ -28,7 +31,7 @@ pub use provider::{
     ReasoningShape, SourceType, ToolCallShape,
 };
 pub use registry::ProviderRegistry;
-pub use request::{ModelRequest, ToolSpec};
+pub use request::{ModelRequest, ReasoningEffort, ToolSpec};
 pub use retry::{retry, RetryPolicy};
 
 #[cfg(test)]

@@ -64,6 +64,8 @@ pub struct FooterStats {
     pub context_limit: usize,
     pub cost_usd: Option<f64>,
     pub quota_reset: Option<String>,
+    /// The requested reasoning-effort level, when one is set.
+    pub effort: Option<String>,
 }
 
 /// The optional thinking/reasoning side panel.

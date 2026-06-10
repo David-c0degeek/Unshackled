@@ -1,4 +1,4 @@
-﻿//! Bad-output detection and recovery for LocalPilot.
+//! Bad-output detection and recovery for LocalPilot.
 //!
 //! Owns context-aware detection of degraded model/backend states and the
 //! recovery ladder that responds to them. It prefers stopping safely over
@@ -9,5 +9,5 @@
 mod detect;
 mod engine;
 
-pub use detect::{detect, is_repeated_token_loop, is_slash_flood, BadOutputKind};
+pub use detect::{detect, is_repeated_token_loop, is_slash_flood, BadOutputKind, StreamMonitor};
 pub use engine::{ModelHealth, RecoveryAction, RecoveryBudget, RecoveryDiagnostic, RecoveryEngine};

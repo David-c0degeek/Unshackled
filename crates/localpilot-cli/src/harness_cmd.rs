@@ -454,10 +454,10 @@ where
             .ok()
             .and_then(|t| Progress::parse(&t).ok())
             .and_then(|p| p.next_incomplete().map(|s| s.description.clone()));
-        let Some(step_description) = next_step else {
+        if next_step.is_none() {
             writeln!(out, "all steps complete")?;
             break;
-        };
+        }
 
         let mut runtime = build_runtime(
             root,
@@ -468,11 +468,14 @@ where
             run.trusted,
             model,
             &mcp,
-            config.harness.context_token_limit,
+            localpilot_harness::effective_context_limit(
+                provider.declaration().max_context_tokens,
+                config.harness.context_token_limit,
+            ),
             gate_allowance.clone(),
             (run.approver)(),
         );
-        crate::context_inject::seed(root, &mut runtime, &step_description);
+        crate::context_inject::register(root, &mut runtime);
         let outcome = resume_one_step_with_events(
             &mut runtime,
             root,

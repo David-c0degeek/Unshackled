@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "localpilot-skills"
 version = "0.1.0"
 edition.workspace = true
@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 figment = { workspace = true }
 serde = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

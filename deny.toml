@@ -3,6 +3,17 @@
 # members with `dep = { workspace = true }`; there is no second pin in a member
 # crate. New dependencies must pass `cargo deny check` and `cargo audit` before
 # use. Run `cargo deny check` as part of the pre-release gate.
+#
+# Minimum release age: a newly adopted crate *version* must have been published
+# at least 14 days before adoption (supply-chain attacks are usually caught in
+# the first days after a malicious publish). cargo-deny cannot check publish
+# dates, so this is enforced at review: the CI lockfile guard fails any
+# Cargo.lock drift that has no matching manifest change, and the reviewer of a
+# manifest change verifies the version's publish date on crates.io.
+#
+# Build scripts: a new dependency that adds a `build.rs` (or a new proc-macro)
+# gets its build script read at review before adoption — build scripts run
+# arbitrary code at compile time on every contributor machine and in CI.
 
 [advisories]
 # RustSec advisory database. Advisories are normally resolved by upgrading, not

@@ -1,6 +1,5 @@
 ---
 source: crates/localpilot-cli/tests/../src/doctor.rs
-assertion_line: 359
 expression: render(&fixture())
 ---
 LocalPilot 0.0.0-test
@@ -14,8 +13,8 @@ config search paths:
   project: /work/.localpilot.toml (present)
 
 providers:
-  local: credential LOCALPILOT_LOCAL_API_KEY not set
-  openai: credential OPENAI_API_KEY set
+  local: credential LOCALPILOT_LOCAL_API_KEY not set; model (none); context window unknown
+  openai: credential OPENAI_API_KEY set; model (none); context window unknown
 
 tools:
   git (git): available

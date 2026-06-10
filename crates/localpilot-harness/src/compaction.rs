@@ -1,4 +1,4 @@
-﻿//! Context compaction.
+//! Context compaction.
 //!
 //! When the conversation approaches the context limit, the oldest exchanges are
 //! dropped — but never in a way that separates a tool call from its result. We
@@ -6,7 +6,15 @@
 //! exchanges, always keeping any leading system messages and the most recent
 //! exchange.
 
-use localpilot_core::{ContentBlock, Message, Role};
+use localpilot_core::{ContentBlock, Message, Role, StructuredSummary};
+
+/// Title line for a compaction summary. Shared shape with harness branch
+/// summaries via [`StructuredSummary`].
+const SUMMARY_TITLE: &str = "Conversation summary for trimmed history:";
+
+/// Floor for a truncated tool-result output during the last-resort truncation
+/// pass: enough to keep the head of the output meaningful.
+const TRUNCATED_OUTPUT_CHARS: usize = 240;
 
 /// A rough token estimate (~4 characters per token) over message text.
 #[must_use]
@@ -39,8 +47,10 @@ pub fn compact(messages: Vec<Message>, token_limit: usize) -> Vec<Message> {
 pub struct CompactionResult {
     /// Messages to send to the provider.
     pub messages: Vec<Message>,
-    /// Whether older messages were removed.
+    /// Whether older messages were removed (or oversized outputs truncated).
     pub compacted: bool,
+    /// The structured digest of what was trimmed, when anything was.
+    pub summary: Option<StructuredSummary>,
 }
 
 /// Compact `messages` and inject a bounded summary when old exchanges are
@@ -52,6 +62,7 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         return CompactionResult {
             messages,
             compacted: false,
+            summary: None,
         };
     }
 
@@ -59,8 +70,35 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         .iter()
         .take_while(|m| m.role == Role::System)
         .count();
-    let system = messages[..system_count].to_vec();
+    let mut system = messages[..system_count].to_vec();
     let body = &messages[system_count..];
+
+    // Iterative compaction: a summary injected by an earlier compaction is
+    // carried forward into the next digest instead of accumulating as extra
+    // system messages.
+    let mut carried: Vec<String> = Vec::new();
+    system.retain(|message| match first_text(message) {
+        Some(text) if text.starts_with(SUMMARY_TITLE) => {
+            carried.extend(
+                text.lines()
+                    .skip(1)
+                    .map(|line| line.trim_start_matches("- ").to_string()),
+            );
+            false
+        }
+        _ => true,
+    });
+    let fold_carried = |summary: Option<StructuredSummary>| -> Option<StructuredSummary> {
+        const MAX_ENTRIES: usize = 8;
+        if carried.is_empty() {
+            return summary;
+        }
+        let mut entries = carried.clone();
+        entries.extend(summary.map(|s| s.entries).unwrap_or_default());
+        let excess = entries.len().saturating_sub(MAX_ENTRIES);
+        entries.drain(..excess);
+        Some(StructuredSummary::new(SUMMARY_TITLE, entries))
+    };
 
     // Group the body into exchanges that each start at a user message, so a tool
     // call and its result always live in the same exchange.
@@ -89,7 +127,7 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         dropped.push(exchanges.remove(0));
     }
 
-    let mut summary = summary_message(&dropped);
+    let mut summary = fold_carried(structured_summary(&dropped));
 
     // If a single very large recent window still exceeds the limit, keep
     // removing whole oldest exchanges before considering the summary. Removing
@@ -98,26 +136,70 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         && estimate_tokens(&build_messages(&system, summary.as_ref(), &exchanges)) > token_limit
     {
         dropped.push(exchanges.remove(0));
-        summary = summary_message(&dropped);
+        summary = fold_carried(structured_summary(&dropped));
     }
 
     let mut out = build_messages(&system, summary.as_ref(), &exchanges);
     if estimate_tokens(&out) > token_limit && !dropped.is_empty() {
         for (max_exchanges, max_user_chars) in [(4, 60), (2, 60), (1, 60), (1, 30)] {
-            summary = summary_message_with(&dropped, max_exchanges, max_user_chars);
+            summary = fold_carried(structured_summary_with(
+                &dropped,
+                max_exchanges,
+                max_user_chars,
+            ));
             out = build_messages(&system, summary.as_ref(), &exchanges);
             if estimate_tokens(&out) <= token_limit {
                 break;
             }
         }
         if estimate_tokens(&out) > token_limit {
+            summary = None;
             out = build_messages(&system, None, &exchanges);
         }
     }
 
+    // Last resort: nothing left to drop (a single oversized kept exchange —
+    // typically one huge tool result) can still exceed the limit. Truncate
+    // tool-result outputs, oldest first, rather than giving up over budget.
+    // Truncating only outputs never separates a tool_use from its result.
+    if estimate_tokens(&out) > token_limit {
+        truncate_oldest_tool_results(&mut out, token_limit);
+    }
+
+    // Even when the summary message was dropped to fit the budget, the result
+    // digest keeps the carried entries so the event log loses nothing.
+    let digest = summary.or_else(|| fold_carried(None)).unwrap_or_else(|| {
+        StructuredSummary::new(
+            SUMMARY_TITLE,
+            vec!["older exchanges were trimmed".to_string()],
+        )
+    });
+
     CompactionResult {
         messages: out,
         compacted: true,
+        summary: Some(digest),
+    }
+}
+
+/// Truncate kept tool-result outputs, oldest first, stopping as soon as the
+/// conversation fits (or every output is already truncated). The pairing
+/// invariant is untouched: only the *content* of results shrinks, never their
+/// presence.
+fn truncate_oldest_tool_results(messages: &mut [Message], token_limit: usize) {
+    for index in 0..messages.len() {
+        if estimate_tokens(messages) <= token_limit {
+            return;
+        }
+        for block in &mut messages[index].content {
+            if let ContentBlock::ToolResult(result) = block {
+                if result.output.chars().count() > TRUNCATED_OUTPUT_CHARS {
+                    let mut kept = truncate(&result.output, TRUNCATED_OUTPUT_CHARS);
+                    kept.push_str("\n[output truncated during context compaction]");
+                    result.output = kept;
+                }
+            }
+        }
     }
 }
 
@@ -145,36 +227,37 @@ pub fn merge_consecutive_system(messages: Vec<Message>) -> Vec<Message> {
 
 fn build_messages(
     system: &[Message],
-    summary: Option<&Message>,
+    summary: Option<&StructuredSummary>,
     exchanges: &[Vec<Message>],
 ) -> Vec<Message> {
     system
         .iter()
         .cloned()
-        .chain(summary.cloned())
+        .chain(summary.map(|digest| Message::text(Role::System, digest.render())))
         .chain(exchanges.iter().flatten().cloned())
         .collect()
 }
 
-fn summary_message(dropped: &[Vec<Message>]) -> Option<Message> {
-    summary_message_with(dropped, 4, 120)
+fn structured_summary(dropped: &[Vec<Message>]) -> Option<StructuredSummary> {
+    structured_summary_with(dropped, 4, 120)
 }
 
-fn summary_message_with(
+fn structured_summary_with(
     dropped: &[Vec<Message>],
     max_exchanges: usize,
     max_user_chars: usize,
-) -> Option<Message> {
+) -> Option<StructuredSummary> {
     if dropped.is_empty() {
         return None;
     }
-    let mut lines = vec!["Conversation summary for trimmed history:".to_string()];
-    for exchange in dropped.iter().rev().take(max_exchanges).rev() {
-        if let Some(line) = summarize_exchange(exchange, max_user_chars) {
-            lines.push(line);
-        }
-    }
-    Some(Message::text(Role::System, lines.join("\n")))
+    let entries = dropped
+        .iter()
+        .rev()
+        .take(max_exchanges)
+        .rev()
+        .filter_map(|exchange| summarize_exchange(exchange, max_user_chars))
+        .collect();
+    Some(StructuredSummary::new(SUMMARY_TITLE, entries))
 }
 
 fn summarize_exchange(exchange: &[Message], max_user_chars: usize) -> Option<String> {
@@ -192,12 +275,12 @@ fn summarize_exchange(exchange: &[Message], max_user_chars: usize) -> Option<Str
         })
         .collect();
     match (user, tools.is_empty()) {
-        (Some(user), true) => Some(format!("- user asked: {user}")),
+        (Some(user), true) => Some(format!("user asked: {user}")),
         (Some(user), false) => Some(format!(
-            "- user asked: {user}; tools used: {}",
+            "user asked: {user}; tools used: {}",
             tools.join(", ")
         )),
-        (None, false) => Some(format!("- tools used: {}", tools.join(", "))),
+        (None, false) => Some(format!("tools used: {}", tools.join(", "))),
         (None, true) => None,
     }
 }
@@ -339,6 +422,113 @@ mod tests {
             })
             .collect();
         assert_eq!(call_ids, result_ids);
+    }
+
+    #[test]
+    fn a_single_oversized_exchange_is_truncated_not_given_up_on() {
+        // One huge tool result in the only (kept) exchange: nothing can be
+        // dropped, so the output itself must shrink to fit the budget.
+        let mut messages = vec![
+            Message::text(Role::System, "sys"),
+            user("read the big file"),
+        ];
+        messages.push(Message::new(
+            Role::Assistant,
+            vec![ContentBlock::ToolUse(ToolCall::new(
+                ToolUseId::from("big"),
+                "read_file",
+                serde_json::json!({ "path": "big.txt" }),
+            ))],
+        ));
+        messages.push(Message::new(
+            Role::Tool,
+            vec![ContentBlock::ToolResult(ToolResult::success(
+                ToolUseId::from("big"),
+                "x".repeat(64 * 1024),
+            ))],
+        ));
+
+        let result = compact_with_summary(messages, 500);
+
+        assert!(result.compacted);
+        assert!(
+            estimate_tokens(&result.messages) <= 500,
+            "still over budget: {}",
+            estimate_tokens(&result.messages)
+        );
+        // Pairing held: the tool_use and its (truncated) result both survive.
+        let calls = result
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter(|b| matches!(b, ContentBlock::ToolUse(_)))
+            .count();
+        let results: Vec<&str> = result
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult(r) => Some(r.output.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls, 1);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].contains("[output truncated during context compaction]"));
+    }
+
+    #[test]
+    fn compaction_result_carries_a_structured_summary() {
+        let mut messages = vec![Message::text(Role::System, "sys")];
+        for i in 0..6 {
+            messages.push(user(&format!("turn {i} {}", "x".repeat(120))));
+            messages.extend(tool_exchange(&format!("call_{i}")));
+        }
+        let result = compact_with_summary(messages, 160);
+        assert!(result.compacted);
+        let summary = result.summary.expect("a digest of what was trimmed");
+        assert_eq!(summary.title, SUMMARY_TITLE);
+        assert!(!summary.entries.is_empty());
+    }
+
+    #[test]
+    fn a_previous_summary_feeds_the_next_compaction() {
+        // First compaction produces a summary; a manually compacted history
+        // carries it as a system message. The next compaction folds those
+        // entries into the new digest instead of stacking summary messages.
+        let mut messages = vec![
+            Message::text(Role::System, "sys"),
+            Message::text(
+                Role::System,
+                format!(
+                    "{SUMMARY_TITLE}
+- user asked: earlier work"
+                ),
+            ),
+        ];
+        for i in 0..6 {
+            messages.push(user(&format!("turn {i} {}", "x".repeat(120))));
+            messages.extend(tool_exchange(&format!("call_{i}")));
+        }
+
+        let result = compact_with_summary(messages, 320);
+        assert!(result.compacted);
+        let summary = result.summary.expect("a digest");
+        assert!(
+            summary.entries.iter().any(|e| e.contains("earlier work")),
+            "carried entries: {:?}",
+            summary.entries
+        );
+        // Exactly one summary system message in the output.
+        let summary_messages = result
+            .messages
+            .iter()
+            .filter(|m| {
+                m.role == Role::System
+                    && first_text(m).is_some_and(|t| t.starts_with(SUMMARY_TITLE))
+            })
+            .count();
+        assert_eq!(summary_messages, 1);
     }
 
     #[test]

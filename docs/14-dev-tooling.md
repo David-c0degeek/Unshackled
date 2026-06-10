@@ -1,4 +1,4 @@
-﻿# Development Tooling
+# Development Tooling
 
 What to use while building LocalPilot: AI-assistant capabilities already in the
 loop, optional MCP servers, cargo tooling worth installing, and repo
@@ -139,6 +139,23 @@ PRs:
   build sessions.
 - **`cargo deny` / `cargo audit` step in CI** — the testing doc lists them as
   optional; promote to a non-blocking (then blocking) CI job before v1 release.
+
+### Supply-chain posture (present)
+
+The CI workflow enforces three guards beyond `cargo deny`/`audit`/`machete`:
+
+- **Lockfile guard** — a pull request that changes `Cargo.lock` without any
+  `Cargo.toml` change fails: dependency moves come from manifest decisions,
+  never silent drift.
+- **Minimum release age** — a newly adopted crate version must be at least 14
+  days past its crates.io publish date at adoption (policy in `deny.toml`;
+  verified at review on the manifest change the lockfile guard forces).
+- **Build-script audit** — a new dependency that introduces a `build.rs` or a
+  proc-macro gets its build script read at review before adoption; build
+  scripts execute arbitrary code at compile time.
+- **Install smoke test** — CI installs the CLI from the locked graph into a
+  clean root (`cargo install --path crates/localpilot-cli --locked`) and runs
+  the produced binary, so "builds in-tree but does not install" cannot ship.
 
 ## 5. Project skills (portable across Claude and Codex)
 

@@ -10,17 +10,22 @@
 
 mod atomic;
 mod error;
+mod events;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use localpilot_config::redact::redact;
-use localpilot_core::{Message, SessionId};
+use localpilot_core::{EventId, Message, SessionId};
 use serde::{Deserialize, Serialize};
 
 pub use atomic::atomic_write;
 pub use error::StoreError;
+pub use events::{
+    origin_for, transcript_from_events, MessageOrigin, OpenReason, SessionEvent, SessionEventKind,
+    SESSION_EVENT_FORMAT_VERSION,
+};
 
 const SESSIONS_DIR: &str = "sessions";
 const CACHE_DIR: &str = "cache";
@@ -122,6 +127,57 @@ impl Store {
         Ok(messages)
     }
 
+    // --- session event log ---------------------------------------------------
+
+    fn events_path(&self, session: SessionId) -> PathBuf {
+        self.root
+            .join(SESSIONS_DIR)
+            .join(format!("{session}.events.jsonl"))
+    }
+
+    /// Append one event to a session's durable event log, redacting it first.
+    /// Returns the event's id for parent chaining.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] on serialization or filesystem failure.
+    pub fn append_event(
+        &self,
+        session: SessionId,
+        parent: Option<EventId>,
+        kind: SessionEventKind,
+    ) -> Result<EventId, StoreError> {
+        let event = SessionEvent {
+            v: SESSION_EVENT_FORMAT_VERSION,
+            id: EventId::new(),
+            parent_id: parent,
+            at_unix: now_unix(),
+            kind,
+        };
+        let path = self.events_path(session);
+        let mut content = read_to_string_opt(&path)?.unwrap_or_default();
+        content.push_str(&redact(&serde_json::to_string(&event)?));
+        content.push('\n');
+        atomic_write(&path, content.as_bytes())?;
+        Ok(event.id)
+    }
+
+    /// Read a session's event log in order, migrating older format versions on
+    /// load. A missing log yields an empty sequence.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a line is unreadable or written by a newer
+    /// format version than this build supports.
+    pub fn read_events(&self, session: SessionId) -> Result<Vec<SessionEvent>, StoreError> {
+        let Some(content) = read_to_string_opt(&self.events_path(session))? else {
+            return Ok(Vec::new());
+        };
+        content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(SessionEvent::from_line)
+            .collect()
+    }
+
     // --- index -------------------------------------------------------------
 
     fn index_path(&self) -> PathBuf {
@@ -134,6 +190,18 @@ impl Store {
     /// Returns [`StoreError`] if the index exists but cannot be read or parsed.
     pub fn list_sessions(&self) -> Result<Vec<SessionIndexEntry>, StoreError> {
         Ok(self.load_index()?.sessions)
+    }
+
+    /// The most recently updated session in this workspace, if any.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if the index exists but cannot be read or parsed.
+    pub fn latest_session(&self) -> Result<Option<SessionIndexEntry>, StoreError> {
+        Ok(self
+            .load_index()?
+            .sessions
+            .into_iter()
+            .max_by_key(|entry| entry.updated_unix))
     }
 
     fn load_index(&self) -> Result<SessionIndex, StoreError> {

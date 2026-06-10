@@ -8,6 +8,10 @@ pub enum SkillError {
     #[error("invalid skill manifest: {0}")]
     InvalidManifest(String),
 
+    /// A prompt template was invalid or could not be rendered.
+    #[error("invalid prompt template: {0}")]
+    InvalidTemplate(String),
+
     /// A filesystem operation failed.
     #[error("skills io error at {path}: {source}")]
     Io {

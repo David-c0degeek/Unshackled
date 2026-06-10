@@ -1,16 +1,36 @@
-﻿//! Seed retrieved LocalMind context into a session before a turn.
+//! Seed retrieved LocalMind context into a session before a turn.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use localpilot_harness::SessionRuntime;
+use localpilot_harness::{ContextHook, SessionRuntime};
 
-/// Inject relevant accepted project memory for `query` as a system message. A
-/// no-op when nothing matches or on any retrieval error (best-effort context,
-/// never fatal to the turn).
-pub fn seed(cwd: &Path, runtime: &mut SessionRuntime, query: &str) {
-    if let Ok(Some(context)) = localpilot_localmind::context_for(cwd, query) {
-        runtime.seed_system(context);
+/// LocalMind retrieval as a pre-turn context hook: relevant accepted project
+/// memory is contributed as system context for the upcoming turn. Best-effort
+/// — a retrieval miss or error contributes nothing and never fails the turn.
+pub struct LocalMindContext {
+    root: PathBuf,
+}
+
+impl ContextHook for LocalMindContext {
+    fn name(&self) -> &str {
+        "localmind-context"
     }
+
+    fn context_for(&self, prompt: &str) -> Option<String> {
+        localpilot_localmind::context_for(&self.root, prompt)
+            .ok()
+            .flatten()
+    }
+}
+
+/// Register the LocalMind context hook on a runtime.
+pub fn register(cwd: &Path, runtime: &mut SessionRuntime) {
+    runtime
+        .hooks_mut()
+        .register_context_hook(Arc::new(LocalMindContext {
+            root: cwd.to_path_buf(),
+        }));
 }
 
 /// Close out a finished session into LocalMind: extract candidate lessons and

@@ -1199,6 +1199,7 @@ dependencies = [
  "localpilot-mcp",
  "localpilot-quota",
  "localpilot-recovery",
+ "localpilot-rpc",
  "localpilot-sandbox",
  "localpilot-store",
  "localpilot-tools",
@@ -1255,6 +1256,7 @@ dependencies = [
  "localpilot-sandbox",
  "localpilot-store",
  "localpilot-tools",
+ "proptest",
  "serde",
  "serde_json",
  "tempfile",
@@ -1273,6 +1275,7 @@ dependencies = [
  "indexmap",
  "localpilot-config",
  "localpilot-core",
+ "proptest",
  "reqwest",
  "serde",
  "serde_json",
@@ -1323,7 +1326,29 @@ dependencies = [
 name = "localpilot-recovery"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
+]
+
+[[package]]
+name = "localpilot-rpc"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "localpilot-core",
+ "localpilot-harness",
+ "localpilot-llm",
+ "localpilot-recovery",
+ "localpilot-sandbox",
+ "localpilot-store",
+ "localpilot-tools",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -1342,6 +1367,7 @@ version = "0.1.0"
 dependencies = [
  "figment",
  "serde",
+ "serde_yaml",
  "tempfile",
  "thiserror",
 ]

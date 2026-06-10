@@ -1,4 +1,4 @@
-﻿//! LocalMind learning adapter for LocalPilot.
+//! LocalMind learning adapter for LocalPilot.
 //!
 //! This is the host edge between LocalPilot and the host-neutral LocalMind
 //! learning engine. LocalPilot owns evidence capture, permissions, redaction,
@@ -143,6 +143,7 @@ fn role_label(role: Role) -> &'static str {
         Role::User => "user",
         Role::Assistant => "assistant",
         Role::Tool => "tool",
+        Role::UserShell => "user shell",
     }
 }
 

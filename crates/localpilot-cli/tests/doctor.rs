@@ -1,4 +1,4 @@
-﻿#[allow(dead_code)]
+#[allow(dead_code)]
 #[path = "../src/doctor.rs"]
 mod doctor;
 
@@ -20,6 +20,8 @@ fn doctor_does_not_print_secret_values() {
         name: "openai".to_string(),
         credential_env: "OPENAI_API_KEY".to_string(),
         credential_present: true,
+        model: None,
+        context_window: None,
     }];
 
     let rendered = doctor::render(&report);
@@ -51,16 +53,22 @@ fn report() -> DoctorReport {
                 name: "local".to_string(),
                 credential_env: "LOCALPILOT_LOCAL_API_KEY".to_string(),
                 credential_present: false,
+                model: None,
+                context_window: None,
             },
             ProviderStatus {
                 name: "openai".to_string(),
                 credential_env: "OPENAI_API_KEY".to_string(),
                 credential_present: false,
+                model: None,
+                context_window: None,
             },
             ProviderStatus {
                 name: "anthropic".to_string(),
                 credential_env: "ANTHROPIC_API_KEY".to_string(),
                 credential_present: false,
+                model: None,
+                context_window: None,
             },
         ],
         tools: vec![
