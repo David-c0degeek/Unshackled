@@ -1,4 +1,4 @@
-﻿# Configuring a provider
+# Configuring a provider
 
 LocalPilot is provider-neutral. It talks to models through official public APIs
 and local OpenAI-compatible servers; it never uses private or undocumented
@@ -69,8 +69,9 @@ required `max_tokens`).
 kind = "anthropic"
 model = "claude-sonnet-4-6"
 # api_key_env defaults to ANTHROPIC_API_KEY when omitted.
-# max_tokens defaults to 4096; override per provider if you like:
-# max_tokens = 8192
+# max_tokens defaults to 8192 (sized for a coding agent writing whole files);
+# override per provider if you like:
+# max_tokens = 16384
 ```
 
 ```sh
@@ -96,7 +97,15 @@ table into the request body. `suppress_thinking = true` is an LocalPilot-owned
 switch: adapters avoid optional thinking output where the public request shape
 supports it, and the switch itself is not forwarded as a raw API field. Inline
 `<think>...</think>` text emitted by compatible local models is routed to the
-reasoning stream and is not treated as final answer text.
+reasoning stream and is not treated as final answer text, including blocks that
+span many stream chunks or tags split across chunks.
+
+`reasoning_round_trip` is another LocalPilot-owned switch for OpenAI-compatible
+providers: when true, assistant reasoning is replayed to the server as the
+`reasoning_content`/`reasoning_signature` message fields (a local-inference
+convention used by vLLM-style servers). The default is on for local and custom
+endpoints and off for the official hosted API, which does not document those
+fields. The switch itself is never forwarded as a raw API field.
 
 ## Evals
 

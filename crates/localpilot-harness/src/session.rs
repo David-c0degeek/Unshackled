@@ -491,6 +491,20 @@ impl SessionRuntime {
             }
             self.recovery.record_clean_turn();
 
+            // Validate the batch before persisting: a `tool_use` block with a
+            // blank id can never be answered by a `tool_result`, so it must
+            // not enter history at all. Every persisted `tool_use` is
+            // guaranteed an answer on every exit path below.
+            let rejection = invalid_tool_calls(&calls);
+            let calls: Vec<(String, String, serde_json::Value)> = if rejection.is_some() {
+                calls
+                    .into_iter()
+                    .filter(|(id, _, _)| !id.trim().is_empty())
+                    .collect()
+            } else {
+                calls
+            };
+
             // Assemble and persist the assistant message.
             let mut content = Vec::new();
             let reasoning = trim_leading_blank_lines(reasoning);
@@ -513,28 +527,52 @@ impl SessionRuntime {
                     input.clone(),
                 )));
             }
-            self.append(Message::new(Role::Assistant, content));
+            if !content.is_empty() {
+                self.append(Message::new(Role::Assistant, content));
+            }
+
+            if let Some(reason) = rejection {
+                let _ = events.send(RuntimeEvent::Warning(reason.clone()));
+                // Answer every persisted tool_use so the wire contract holds,
+                // carrying the rejection reason back to the model.
+                for (id, _, _) in &calls {
+                    self.append(tool_error_message(
+                        id,
+                        &format!("tool call rejected: {reason}"),
+                    ));
+                }
+                if calls.is_empty() {
+                    // Nothing answerable was persisted; correct via a plain
+                    // user message instead.
+                    self.append(Message::text(Role::User, reason));
+                }
+                continue;
+            }
 
             if calls.is_empty() {
                 return self.stop(events, StopReason::Done);
             }
 
-            if let Some(message) = invalid_tool_calls(&calls) {
-                let _ = events.send(RuntimeEvent::Warning(message.clone()));
-                self.messages.push(Message::text(Role::User, message));
-                continue;
-            }
-
             // Execute tool calls through the permission-gated registry.
-            for (id, name, input) in calls {
+            for index in 0..calls.len() {
                 if tool_calls_used >= self.config.max_tool_calls {
+                    // The remaining calls are already persisted as tool_use
+                    // blocks; answer each before stopping so no request built
+                    // from this history violates the pairing contract.
+                    for (id, _, _) in &calls[index..] {
+                        self.append(tool_error_message(
+                            id,
+                            "tool budget exhausted; the call was not executed",
+                        ));
+                    }
                     return self.stop(events, StopReason::MaxToolCalls);
                 }
                 tool_calls_used += 1;
+                let (id, name, input) = &calls[index];
 
                 // Surface the task plan to the UI as the model updates it.
                 if name == "update_plan" {
-                    if let Some(steps) = parse_plan(&input) {
+                    if let Some(steps) = parse_plan(input) {
                         let _ = events.send(RuntimeEvent::Plan(steps));
                     }
                 }
@@ -543,7 +581,7 @@ impl SessionRuntime {
                     id: id.clone(),
                     name: name.clone(),
                 });
-                let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input);
+                let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input.clone());
                 let ctx = ToolContext {
                     workspace: &self.workspace,
                     interactivity: self.config.interactivity,
@@ -555,7 +593,7 @@ impl SessionRuntime {
                     .await;
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
-                    name,
+                    name: name.clone(),
                     is_error: result.is_error,
                     output: result.output.clone(),
                 });
@@ -582,6 +620,18 @@ impl SessionRuntime {
             let _ = self.store.put_tool_output(&key, &redact(&json));
         }
     }
+}
+
+/// A synthesized error `tool_result` answering a persisted `tool_use` that was
+/// never executed (rejected batch or exhausted tool budget), keeping the
+/// tool-pairing contract intact on every exit path.
+fn tool_error_message(id: &str, output: &str) -> Message {
+    Message::new(
+        Role::Tool,
+        vec![ContentBlock::ToolResult(
+            localpilot_core::ToolResult::error(ToolUseId::from(id), output),
+        )],
+    )
 }
 
 fn trim_leading_blank_lines(mut text: String) -> String {

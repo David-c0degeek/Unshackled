@@ -1,4 +1,4 @@
-﻿//! Provider runtime for LocalPilot.
+//! Provider runtime for LocalPilot.
 //!
 //! Connects the agent to models behind one object-safe [`ModelProvider`] trait
 //! that hides API differences behind a single internal stream contract while
@@ -12,6 +12,7 @@ mod anthropic;
 mod error;
 mod event;
 mod fake;
+mod headers;
 mod openai;
 mod provider;
 mod registry;
