@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "localpilot"
 version = "0.1.0"
 edition.workspace = true
@@ -48,6 +48,7 @@ localpilot-localmind = { path = "../localpilot-localmind" }
 localpilot-mcp = { path = "../localpilot-mcp" }
 localpilot-quota = { path = "../localpilot-quota" }
 localpilot-recovery = { path = "../localpilot-recovery" }
+localpilot-rpc = { path = "../localpilot-rpc" }
 localpilot-sandbox = { path = "../localpilot-sandbox" }
 localpilot-store = { path = "../localpilot-store" }
 localpilot-tools = { path = "../localpilot-tools" }

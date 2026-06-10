@@ -149,6 +149,34 @@ pub fn effective_context_limit(window: Option<u64>, configured: usize) -> usize 
     }
 }
 
+/// A thread-safe queue of steering input: user text typed while a turn is
+/// running, admitted at the next safe provider-turn boundary (after the
+/// current iteration's tool calls, before the next provider call).
+#[derive(Debug, Clone, Default)]
+pub struct SteerQueue(Arc<std::sync::Mutex<std::collections::VecDeque<String>>>);
+
+impl SteerQueue {
+    /// Queue steering text for the running turn.
+    pub fn push(&self, text: impl Into<String>) {
+        if let Ok(mut queue) = self.0.lock() {
+            queue.push_back(text.into());
+        }
+    }
+
+    /// Whether anything is queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.lock().map(|q| q.is_empty()).unwrap_or(true)
+    }
+
+    fn drain(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .map(|mut queue| queue.drain(..).collect())
+            .unwrap_or_default()
+    }
+}
+
 const REPAIR_PROMPT: &str =
     "Your previous response was unusable. Stop, and produce a clean, well-formed reply.";
 
@@ -174,6 +202,8 @@ pub struct SessionRuntime {
     /// The compaction result for the current `history_generation`, so the
     /// per-iteration request shaping does not recompact unchanged history.
     compaction_cache: Option<(u64, CompactionResult)>,
+    /// Steering input queued by the host while a turn runs.
+    steer: SteerQueue,
 }
 
 impl SessionRuntime {
@@ -213,6 +243,7 @@ impl SessionRuntime {
             last_event: None,
             history_generation: 0,
             compaction_cache: None,
+            steer: SteerQueue::default(),
         };
         runtime.record_event(SessionEventKind::SessionOpened {
             reason: OpenReason::New,
@@ -335,6 +366,13 @@ impl SessionRuntime {
     #[must_use]
     pub fn reasoning_effort(&self) -> Option<localpilot_llm::ReasoningEffort> {
         self.config.reasoning_effort
+    }
+
+    /// A clonable handle for queueing steering input into a running turn.
+    /// Queued text is admitted at the next safe provider-turn boundary.
+    #[must_use]
+    pub fn steer_queue(&self) -> SteerQueue {
+        self.steer.clone()
     }
 
     /// Clear user/assistant/tool history while preserving the leading setup
@@ -515,6 +553,12 @@ impl SessionRuntime {
         for _ in 0..self.config.max_turns {
             if cancel.is_cancelled() {
                 return self.stop(events, StopReason::Cancelled);
+            }
+
+            // Admit queued steering input at this safe boundary: after the
+            // previous iteration's tool calls, before the next provider call.
+            for steer_text in self.steer.drain() {
+                self.append(Message::text(Role::User, steer_text));
             }
 
             let compacted = self.compacted_history();

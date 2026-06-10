@@ -21,6 +21,7 @@ mod memory_cmd;
 mod models_cmd;
 #[cfg(feature = "tui")]
 mod repl;
+mod rpc_cmd;
 mod session_cmd;
 #[cfg(feature = "tui")]
 mod trust;
@@ -90,6 +91,36 @@ enum Command {
         /// Provider id; defaults to the configured default provider.
         #[arg(long)]
         provider: Option<String>,
+    },
+    /// Serve the Agent Client Protocol (for editors) on stdin/stdout.
+    Acp {
+        /// Model name to request; defaults to the provider's configured model.
+        #[arg(long)]
+        model: Option<String>,
+        /// Provider id; defaults to the configured default provider.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Permission profile (default | relaxed | bypass).
+        #[arg(long)]
+        permission: Option<String>,
+        /// Shorthand for `--permission bypass`. Must be set explicitly.
+        #[arg(long)]
+        bypass: bool,
+    },
+    /// Drive the session runtime over stdin/stdout (newline-delimited JSON).
+    Rpc {
+        /// Model name to request; defaults to the provider's configured model.
+        #[arg(long)]
+        model: Option<String>,
+        /// Provider id; defaults to the configured default provider.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Permission profile (default | relaxed | bypass).
+        #[arg(long)]
+        permission: Option<String>,
+        /// Shorthand for `--permission bypass`. Must be set explicitly.
+        #[arg(long)]
+        bypass: bool,
     },
     /// Launch the interactive terminal REPL (the TUI). Requires the `tui` build feature.
     #[cfg(feature = "tui")]
@@ -352,6 +383,36 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Models { provider } => {
             models_cmd::run(provider.as_deref()).await?;
+        }
+        Command::Rpc {
+            model,
+            provider,
+            permission,
+            bypass,
+        } => {
+            let profile = session_cmd::resolve_profile(permission.as_deref(), bypass);
+            rpc_cmd::run(
+                model.as_deref(),
+                provider.as_deref(),
+                profile,
+                rpc_cmd::WireProtocol::Native,
+            )
+            .await?;
+        }
+        Command::Acp {
+            model,
+            provider,
+            permission,
+            bypass,
+        } => {
+            let profile = session_cmd::resolve_profile(permission.as_deref(), bypass);
+            rpc_cmd::run(
+                model.as_deref(),
+                provider.as_deref(),
+                profile,
+                rpc_cmd::WireProtocol::Acp,
+            )
+            .await?;
         }
         Command::Update { check } => {
             let mut stdout = io::stdout().lock();
