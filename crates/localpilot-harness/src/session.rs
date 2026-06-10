@@ -219,6 +219,55 @@ impl SessionRuntime {
         self.record_event(SessionEventKind::SessionClosed);
     }
 
+    /// Run a user-initiated shell command through the permission engine. The
+    /// run always lands in the durable event log; unless
+    /// `exclude_from_context` is set, the command and its output are also
+    /// surfaced into the transcript as a [`Role::UserShell`] message so the
+    /// model can see what the user ran. With `exclude_from_context` the model
+    /// context is untouched — the run remains auditable in the event log only.
+    pub async fn run_user_shell(
+        &mut self,
+        program: &str,
+        args: &[String],
+        exclude_from_context: bool,
+    ) -> localpilot_core::ToolResult {
+        let call_id = format!("user-shell-{}", EventId::new());
+        let call = ToolCall::new(
+            ToolUseId::from(call_id.as_str()),
+            "run_shell",
+            serde_json::json!({ "program": program, "args": args }),
+        );
+        self.record_event(SessionEventKind::ToolStarted {
+            id: call_id.clone(),
+            name: "run_shell".to_string(),
+        });
+        let retention = StoreRetention(&self.store);
+        let ctx = ToolContext {
+            workspace: &self.workspace,
+            interactivity: self.config.interactivity,
+            trusted: self.config.trusted,
+            retention: Some(&retention),
+        };
+        let result = self
+            .tools
+            .dispatch(&call, &ctx, &self.engine, self.approver.as_ref())
+            .await;
+        self.record_event(SessionEventKind::ToolFinished {
+            id: call_id,
+            name: "run_shell".to_string(),
+            is_error: result.is_error,
+        });
+        if !exclude_from_context {
+            let rendered = if args.is_empty() {
+                format!("$ {program}\n{}", result.output)
+            } else {
+                format!("$ {program} {}\n{}", args.join(" "), result.output)
+            };
+            self.append(Message::text(Role::UserShell, rendered));
+        }
+        result
+    }
+
     /// The session id (transcripts are stored under it).
     #[must_use]
     pub fn session_id(&self) -> SessionId {
@@ -668,10 +717,12 @@ impl SessionRuntime {
                     name: name.clone(),
                 });
                 let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input.clone());
+                let retention = StoreRetention(&self.store);
                 let ctx = ToolContext {
                     workspace: &self.workspace,
                     interactivity: self.config.interactivity,
                     trusted: self.config.trusted,
+                    retention: Some(&retention),
                 };
                 let result = self
                     .tools
@@ -791,6 +842,21 @@ fn parse_plan(input: &serde_json::Value) -> Option<Vec<PlanStep>> {
         })
         .collect();
     Some(parsed)
+}
+
+/// Adapts the session store as the spill target for oversized tool outputs.
+struct StoreRetention<'a>(&'a Store);
+
+impl localpilot_tools::OutputRetention for StoreRetention<'_> {
+    fn retain(&self, id: &str, output: &str) -> Result<(), String> {
+        self.0
+            .put_tool_output(id, output)
+            .map_err(|err| err.to_string())
+    }
+
+    fn fetch(&self, id: &str) -> Result<Option<String>, String> {
+        self.0.get_tool_output(id).map_err(|err| err.to_string())
+    }
 }
 
 /// The outcome of failing to open a provider stream after retries.

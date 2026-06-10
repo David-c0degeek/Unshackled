@@ -294,7 +294,8 @@ fn translate_message(message: &Message, round_trip_reasoning: bool, out: &mut Ve
 fn role_str(role: Role) -> &'static str {
     match role {
         Role::System => "system",
-        Role::User => "user",
+        // A surfaced user shell run reads to the model as user content.
+        Role::User | Role::UserShell => "user",
         Role::Assistant => "assistant",
         Role::Tool => "tool",
     }

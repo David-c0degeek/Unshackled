@@ -24,6 +24,7 @@ fn ctx(ws: &Workspace, interactivity: Interactivity, trusted: bool) -> ToolConte
         workspace: ws,
         interactivity,
         trusted,
+        retention: None,
     }
 }
 
@@ -85,7 +86,7 @@ async fn unknown_tool_returns_an_error_result_not_a_panic() {
 #[test]
 fn every_builtin_generates_a_schema() {
     let registry = ToolRegistry::with_builtins();
-    assert_eq!(registry.names().len(), 15);
+    assert_eq!(registry.names().len(), 17);
     for (name, schema) in registry.schemas() {
         assert!(schema.is_object(), "{name} produced a non-object schema");
     }
@@ -636,4 +637,166 @@ async fn write_file_refuses_to_clobber_a_binary_file_when_overwrite_is_false() {
         std::fs::read(dir.path().join("blob.bin")).unwrap(),
         vec![0u8, 159, 146, 150]
     );
+}
+
+/// An in-memory retention sink for spill tests.
+#[derive(Default)]
+struct MemoryRetention {
+    entries: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl localpilot_tools::OutputRetention for MemoryRetention {
+    fn retain(&self, id: &str, output: &str) -> Result<(), String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), output.to_string());
+        Ok(())
+    }
+    fn fetch(&self, id: &str) -> Result<Option<String>, String> {
+        Ok(self.entries.lock().unwrap().get(id).cloned())
+    }
+}
+
+#[tokio::test]
+async fn apply_patch_applies_create_update_and_delete_atomically() {
+    let (_dir, ws) = workspace_with(&[
+        ("src/lib.rs", "fn old() {}\nfn keep() {}\n"),
+        ("obsolete.txt", "bye"),
+    ]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "update", "path": "src/lib.rs", "hunks": [
+                { "old_text": "fn old() {}", "new_text": "fn renamed() {}" }
+            ]},
+            { "action": "create", "path": "src/new.rs", "content": "fn fresh() {}\n" },
+            { "action": "delete", "path": "obsolete.txt" }
+        ]}),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", result.output);
+    let lib = std::fs::read_to_string(ws.root().join("src/lib.rs")).unwrap();
+    assert!(lib.contains("fn renamed()"));
+    assert!(std::fs::read_to_string(ws.root().join("src/new.rs"))
+        .unwrap()
+        .contains("fn fresh()"));
+    assert!(!ws.root().join("obsolete.txt").exists());
+}
+
+#[tokio::test]
+async fn apply_patch_rejects_the_whole_patch_when_one_hunk_misses() {
+    let (_dir, ws) = workspace_with(&[("a.txt", "alpha\n")]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "create", "path": "b.txt", "content": "beta\n" },
+            { "action": "update", "path": "a.txt", "hunks": [
+                { "old_text": "does not exist", "new_text": "x" }
+            ]}
+        ]}),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.output.contains("operation 2") && result.output.contains("was not found"),
+        "the error names the failing operation: {}",
+        result.output
+    );
+    // Nothing was applied: the create did not happen either.
+    assert!(!ws.root().join("b.txt").exists());
+}
+
+#[tokio::test]
+async fn apply_patch_approval_detail_previews_the_operations() {
+    let (_dir, ws) = workspace_with(&[("a.txt", "alpha\n")]);
+    let registry = ToolRegistry::with_builtins();
+    // Untrusted workspace: writes ask, so the approver sees the detail.
+    let c = ctx(&ws, Interactivity::Interactive, false);
+    let approver = RecordingApprover::new();
+
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "apply_patch",
+        json!({ "operations": [
+            { "action": "update", "path": "a.txt", "hunks": [
+                { "old_text": "alpha", "new_text": "beta" }
+            ]}
+        ]}),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty());
+    assert!(
+        seen[0].detail.contains("update a.txt (1 hunks)"),
+        "detail: {}",
+        seen[0].detail
+    );
+}
+
+#[tokio::test]
+async fn oversized_output_is_bounded_and_spilled_to_retention() {
+    let big = "line of output\n".repeat(4000); // ~60 KB, beyond the context bound
+    let (_dir, ws) = workspace_with(&[("big.txt", &big)]);
+    let registry = ToolRegistry::with_builtins();
+    let retention = MemoryRetention::default();
+    let c = ToolContext {
+        workspace: &ws,
+        interactivity: Interactivity::Interactive,
+        trusted: true,
+        retention: Some(&retention),
+    };
+
+    let result = dispatch(
+        &registry,
+        "read_file",
+        json!({ "path": "big.txt" }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", result.output);
+    assert!(
+        result.output.len() < big.len() / 2,
+        "context output is bounded"
+    );
+    assert!(result.output.contains("output truncated"));
+    assert!(result.output.contains("read_tool_output"));
+    // Head and tail both survive.
+    assert!(result.output.starts_with("tool: read_file"));
+    assert!(result.output.trim_end().ends_with("line of output"));
+
+    // The full output is retained under the call id and fetchable.
+    let fetched = dispatch(
+        &registry,
+        "read_tool_output",
+        json!({ "id": "c1", "start_line": 1, "end_line": 2 }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+    assert!(!fetched.is_error, "{}", fetched.output);
+    assert!(fetched.output.contains("line of output"));
 }

@@ -11,6 +11,27 @@ pub struct ToolContext<'a> {
     pub workspace: &'a Workspace,
     pub interactivity: Interactivity,
     pub trusted: bool,
+    /// Where oversized tool output spills, keyed by an opaque id the model can
+    /// pass to `read_tool_output`. `None` disables spilling (output is capped
+    /// only).
+    pub retention: Option<&'a dyn OutputRetention>,
+}
+
+/// A sink for full tool outputs that were too large to keep in context. The
+/// host wires its store in; the registry spills, and `read_tool_output`
+/// fetches.
+pub trait OutputRetention: Send + Sync {
+    /// Retain `output` under `id`, replacing any previous value.
+    ///
+    /// # Errors
+    /// Returns a human-readable reason when the output cannot be retained.
+    fn retain(&self, id: &str, output: &str) -> Result<(), String>;
+
+    /// Fetch the retained output for `id`, or `None` if absent.
+    ///
+    /// # Errors
+    /// Returns a human-readable reason when the lookup fails.
+    fn fetch(&self, id: &str) -> Result<Option<String>, String>;
 }
 
 /// A tool's textual result, before redaction and the final id are attached.

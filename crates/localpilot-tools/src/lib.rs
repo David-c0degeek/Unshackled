@@ -1,4 +1,4 @@
-﻿//! Tool system for LocalPilot.
+//! Tool system for LocalPilot.
 //!
 //! Tools are the only path from model output to local side effects. Every call
 //! goes through one registry that validates input against a generated schema,
@@ -13,8 +13,9 @@ mod registry;
 mod tool;
 
 pub use builtins::{
-    EditFile, GitCommit, GitStatus, ListFiles, ReadFile, RunShell, SearchText, WriteFile,
+    ApplyPatch, EditFile, GitCommit, GitStatus, ListFiles, ReadFile, ReadToolOutput, RunShell,
+    SearchText, WriteFile,
 };
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use tool::{Tool, ToolContext, ToolOutput};
+pub use tool::{OutputRetention, Tool, ToolContext, ToolOutput};
