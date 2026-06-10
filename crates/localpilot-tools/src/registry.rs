@@ -9,7 +9,7 @@ use crate::builtins::{
     ApplyPatch, EditFile, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore, GitStatus,
     ListFiles, MultiEdit, ReadFile, ReadToolOutput, RunShell, SearchText, UpdatePlan, WriteFile,
 };
-use crate::tool::{Tool, ToolContext};
+use crate::tool::{GateVerdict, Tool, ToolContext, ToolGate};
 
 /// Context-size bound on a tool result. Output beyond this is kept as head +
 /// tail in context, with the full text spilled to the retention store under
@@ -101,6 +101,21 @@ impl ToolRegistry {
         engine: &PermissionEngine,
         approver: &dyn Approver,
     ) -> ToolResult {
+        self.dispatch_gated(call, ctx, engine, approver, &[]).await
+    }
+
+    /// [`ToolRegistry::dispatch`] with additional tighten-only gates consulted
+    /// *after* the permission engine. The engine is the always-on first link:
+    /// gates run only for calls it (and the user) already authorized, and can
+    /// only block, never grant.
+    pub async fn dispatch_gated(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolContext<'_>,
+        engine: &PermissionEngine,
+        approver: &dyn Approver,
+        gates: &[&dyn ToolGate],
+    ) -> ToolResult {
         let Some(tool) = self.get(&call.name) else {
             return ToolResult::error(
                 call.id.clone(),
@@ -140,6 +155,19 @@ impl ToolRegistry {
                     format_tool_output(
                         tool.name(),
                         &format!("permission denied for {}", tool.name()),
+                        true,
+                    ),
+                );
+            }
+        }
+
+        for gate in gates {
+            if let GateVerdict::Block { reason } = gate.check(call, &effects) {
+                return ToolResult::error(
+                    call.id.clone(),
+                    format_tool_output(
+                        tool.name(),
+                        &format!("blocked by {}: {reason}", gate.name()),
                         true,
                     ),
                 );

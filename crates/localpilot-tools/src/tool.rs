@@ -17,6 +17,30 @@ pub struct ToolContext<'a> {
     pub retention: Option<&'a dyn OutputRetention>,
 }
 
+/// A tighten-only gate consulted after the permission engine for every tool
+/// call. A gate can only `Pass` or `Block` — it can never grant what the
+/// engine refused, so hooks extend the safety model without ever weakening
+/// it. The permission engine itself is the always-on first link of this
+/// chain and is not removable.
+pub trait ToolGate: Send + Sync {
+    /// A stable name, recorded with any block verdict.
+    fn name(&self) -> &str;
+
+    /// Inspect a call (after its effects were resolved and authorized by the
+    /// engine) and either let it proceed or block it with a model-visible
+    /// reason.
+    fn check(&self, call: &localpilot_core::ToolCall, effects: &[Effect]) -> GateVerdict;
+}
+
+/// A gate's verdict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateVerdict {
+    /// Let the call proceed to the next gate (or execution).
+    Pass,
+    /// Refuse the call with a model-visible reason.
+    Block { reason: String },
+}
+
 /// A sink for full tool outputs that were too large to keep in context. The
 /// host wires its store in; the registry spills, and `read_tool_output`
 /// fetches.

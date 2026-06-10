@@ -24,6 +24,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use crate::compaction::{compact_with_summary, estimate_tokens, CompactionResult};
+use crate::hooks::{HookEvent, HookFabric};
 use crate::quality::{CheckOutcome, CheckRunner};
 use crate::rules::{trigger_for_cadence, Trigger};
 
@@ -204,6 +205,8 @@ pub struct SessionRuntime {
     compaction_cache: Option<(u64, CompactionResult)>,
     /// Steering input queued by the host while a turn runs.
     steer: SteerQueue,
+    /// Registered lifecycle observers, context hooks, and tool gates.
+    hooks: HookFabric,
 }
 
 impl SessionRuntime {
@@ -244,6 +247,7 @@ impl SessionRuntime {
             history_generation: 0,
             compaction_cache: None,
             steer: SteerQueue::default(),
+            hooks: HookFabric::default(),
         };
         runtime.record_event(SessionEventKind::SessionOpened {
             reason: OpenReason::New,
@@ -375,6 +379,12 @@ impl SessionRuntime {
         self.steer.clone()
     }
 
+    /// The hook fabric, for registering observers, context hooks, and tool
+    /// gates. Gates are tighten-only and run after the permission engine.
+    pub fn hooks_mut(&mut self) -> &mut HookFabric {
+        &mut self.hooks
+    }
+
     /// Clear user/assistant/tool history while preserving the leading setup
     /// messages required for future turns.
     pub fn clear_conversation(&mut self) {
@@ -434,7 +444,12 @@ impl SessionRuntime {
         let mut outcomes = Vec::new();
         for check in checks {
             if trigger_for_cadence(check.cadence) == trigger {
-                outcomes.push(runner.run(check).await);
+                let outcome = runner.run(check).await;
+                self.hooks.notify(&HookEvent::GateCheck {
+                    name: outcome.name.clone(),
+                    passed: outcome.passed(),
+                });
+                outcomes.push(outcome);
             }
         }
         outcomes
@@ -480,6 +495,9 @@ impl SessionRuntime {
                     } else {
                         if let Some(reset) = self.last_quota.as_ref().map(quota_reset_label) {
                             let _ = events.send(RuntimeEvent::QuotaPaused {
+                                reset: reset.clone(),
+                            });
+                            self.hooks.notify(&HookEvent::QuotaPaused {
                                 reset: reset.clone(),
                             });
                             self.record_event(SessionEventKind::QuotaPaused { reset });
@@ -531,6 +549,7 @@ impl SessionRuntime {
             if let Some(summary) = result.summary.clone() {
                 self.record_event(SessionEventKind::Compacted { summary });
             }
+            self.hooks.notify(&HookEvent::Compacted);
         }
         self.compaction_cache = Some((self.history_generation, result.clone()));
         result
@@ -545,6 +564,11 @@ impl SessionRuntime {
         events: &broadcast::Sender<RuntimeEvent>,
         cancel: &CancellationToken,
     ) -> StopReason {
+        // Context hooks contribute system context for this turn through the
+        // same seeded-system path a host would use.
+        for context in self.hooks.context_for(user_input) {
+            self.seed_system(context);
+        }
         self.append(Message::text(Role::User, user_input));
         self.last_quota = None;
         let mut tool_calls_used = 0u32;
@@ -580,6 +604,9 @@ impl SessionRuntime {
                 .with_reasoning_effort(self.config.reasoning_effort);
 
             self.record_event(SessionEventKind::TurnStarted {
+                model: self.config.model.clone(),
+            });
+            self.hooks.notify(&HookEvent::TurnStarted {
                 model: self.config.model.clone(),
             });
             let mut stream = match self.open_stream(&request, events, cancel).await {
@@ -642,6 +669,9 @@ impl SessionRuntime {
                                 let _ = events.send(RuntimeEvent::QuotaPaused {
                                     reset: reset.clone(),
                                 });
+                                self.hooks.notify(&HookEvent::QuotaPaused {
+                                    reset: reset.clone(),
+                                });
                                 self.record_event(SessionEventKind::QuotaPaused { reset });
                             }
                             let _ = events
@@ -678,6 +708,9 @@ impl SessionRuntime {
                 self.record_event(SessionEventKind::RecoveryDiagnostic {
                     kind: format!("{kind:?}"),
                     health: format!("{:?}", self.recovery.health()),
+                });
+                self.hooks.notify(&HookEvent::Recovery {
+                    health: self.recovery.health(),
                 });
                 if self.recovery.health() == ModelHealth::Degraded {
                     return self.stop(events, StopReason::Degraded);
@@ -799,18 +832,57 @@ impl SessionRuntime {
                     id: id.clone(),
                     name: name.clone(),
                 });
+                self.hooks.notify(&HookEvent::ToolStarted {
+                    id: id.clone(),
+                    name: name.clone(),
+                });
                 let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input.clone());
-                let retention = StoreRetention(&self.store);
-                let ctx = ToolContext {
-                    workspace: &self.workspace,
-                    interactivity: self.config.interactivity,
-                    trusted: self.config.trusted,
-                    retention: Some(&retention),
+                // Cancellation races the executing tool: an abort synthesizes
+                // an error result (the pairing contract holds), and dropping
+                // the dispatch future drops spawned children, which are
+                // configured to die with it instead of waiting out their
+                // timeout. The aborted execution stays in the event log.
+                let result = {
+                    let retention = StoreRetention(&self.store);
+                    let ctx = ToolContext {
+                        workspace: &self.workspace,
+                        interactivity: self.config.interactivity,
+                        trusted: self.config.trusted,
+                        retention: Some(&retention),
+                    };
+                    let gates = self.hooks.gates();
+                    tokio::select! {
+                        () = cancel.cancelled() => None,
+                        result = self.tools.dispatch_gated(
+                            &call,
+                            &ctx,
+                            &self.engine,
+                            self.approver.as_ref(),
+                            &gates,
+                        ) => Some(result),
+                    }
                 };
-                let result = self
-                    .tools
-                    .dispatch(&call, &ctx, &self.engine, self.approver.as_ref())
-                    .await;
+                let Some(result) = result else {
+                    let aborted = localpilot_core::ToolResult::error(
+                        ToolUseId::from(id.as_str()),
+                        "cancelled by the user; execution aborted",
+                    );
+                    self.record_event(SessionEventKind::ToolFinished {
+                        id: id.clone(),
+                        name: name.clone(),
+                        is_error: true,
+                    });
+                    self.hooks.notify(&HookEvent::ToolFinished {
+                        id: id.clone(),
+                        name: name.clone(),
+                        is_error: true,
+                    });
+                    self.append(Message::new(
+                        Role::Tool,
+                        vec![ContentBlock::ToolResult(aborted)],
+                    ));
+                    return self.stop(events, StopReason::Cancelled);
+                };
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
                     name: name.clone(),
@@ -818,6 +890,11 @@ impl SessionRuntime {
                     output: result.output.clone(),
                 });
                 self.record_event(SessionEventKind::ToolFinished {
+                    id: result.id.to_string(),
+                    name: name.clone(),
+                    is_error: result.is_error,
+                });
+                self.hooks.notify(&HookEvent::ToolFinished {
                     id: result.id.to_string(),
                     name: name.clone(),
                     is_error: result.is_error,
@@ -839,6 +916,7 @@ impl SessionRuntime {
         self.record_event(SessionEventKind::TurnEnded {
             stop: format!("{reason:?}"),
         });
+        self.hooks.notify(&HookEvent::TurnEnded { reason });
         let _ = events.send(RuntimeEvent::Stopped(reason));
         reason
     }
