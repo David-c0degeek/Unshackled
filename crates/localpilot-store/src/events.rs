@@ -57,6 +57,8 @@ pub enum MessageOrigin {
     /// Synthesized by the runtime (repair prompt, rejection feedback, budget
     /// notice); `why` records the reason.
     Synthetic { why: String },
+    /// A user-initiated shell run surfaced into the transcript.
+    Shell,
 }
 
 /// What happened. Growable; the format version covers shape changes.
@@ -213,6 +215,7 @@ pub fn origin_for(message: &Message) -> MessageOrigin {
         localpilot_core::Role::Assistant => MessageOrigin::Assistant,
         localpilot_core::Role::Tool => MessageOrigin::ToolResult,
         localpilot_core::Role::System => MessageOrigin::System,
+        localpilot_core::Role::UserShell => MessageOrigin::Shell,
     }
 }
 

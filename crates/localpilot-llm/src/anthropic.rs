@@ -295,8 +295,8 @@ fn translate_blocks(message: &Message) -> Vec<Value> {
 
 fn anthropic_role(role: Role) -> &'static str {
     match role {
-        // Tool results are delivered to the model in a user turn.
-        Role::User | Role::Tool => "user",
+        // Tool results and surfaced shell runs are delivered in a user turn.
+        Role::User | Role::Tool | Role::UserShell => "user",
         Role::Assistant => "assistant",
         // A non-leading system message keeps its position as user-role content;
         // this wire has no positional system role.

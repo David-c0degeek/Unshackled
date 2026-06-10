@@ -1,4 +1,4 @@
-﻿//! The LocalPilot skill manifest (`skill.toml`).
+//! The LocalPilot skill manifest (`skill.toml`).
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,67 @@ impl SkillManifest {
             .extract()
             .map_err(|e| SkillError::InvalidManifest(e.to_string()))
     }
+
+    /// Parse a manifest from a standard `SKILL.md` file's YAML frontmatter
+    /// (the agentskills.io format: required `name` and `description`; the
+    /// name is at most 64 characters of lowercase letters, digits, and
+    /// hyphens). Returns the manifest and the markdown body after the
+    /// frontmatter.
+    ///
+    /// # Errors
+    /// Returns [`SkillError::InvalidManifest`] if the frontmatter is missing,
+    /// malformed, or violates the name constraints.
+    pub fn parse_skill_md(content: &str) -> Result<(Self, String), SkillError> {
+        let rest = content.strip_prefix("---").ok_or_else(|| {
+            SkillError::InvalidManifest(
+                "SKILL.md must start with `---` YAML frontmatter".to_string(),
+            )
+        })?;
+        let (front, body) = rest.split_once("\n---").ok_or_else(|| {
+            SkillError::InvalidManifest("unterminated SKILL.md frontmatter".to_string())
+        })?;
+        let front: SkillFrontmatter =
+            serde_yaml::from_str(front).map_err(|e| SkillError::InvalidManifest(e.to_string()))?;
+        if front.name.is_empty()
+            || front.name.len() > 64
+            || !front
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err(SkillError::InvalidManifest(format!(
+                "skill name `{}` must be 1-64 lowercase letters, digits, or hyphens",
+                front.name
+            )));
+        }
+        let manifest = Self {
+            name: front.name,
+            description: front.description,
+            version: front
+                .metadata
+                .get("version")
+                .cloned()
+                .unwrap_or_else(|| "0.0.0".to_string()),
+            triggers: SkillTriggers::default(),
+            required_tools: Vec::new(),
+            permissions: Vec::new(),
+            assets: Vec::new(),
+            scripts: Vec::new(),
+        };
+        Ok((manifest, body.trim_start_matches('\n').to_string()))
+    }
+}
+
+/// The frontmatter fields of a standard `SKILL.md` file.
+#[derive(Debug, Deserialize)]
+struct SkillFrontmatter {
+    name: String,
+    description: String,
+    #[serde(default)]
+    #[allow(dead_code)] // recorded, not yet consumed
+    license: Option<String>,
+    #[serde(default)]
+    metadata: std::collections::BTreeMap<String, String>,
 }
 
 #[cfg(test)]

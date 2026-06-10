@@ -1,4 +1,4 @@
-﻿//! Skill discovery and suggestion for LocalPilot.
+//! Skill discovery and suggestion for LocalPilot.
 //!
 //! Owns skill discovery and loading, the skill manifest format, and skill
 //! suggestion heuristics that generate disabled drafts from repeated workflows.
@@ -12,8 +12,10 @@ mod error;
 mod loader;
 mod manifest;
 mod suggest;
+mod templates;
 
 pub use error::SkillError;
-pub use loader::{Skill, SkillSet};
+pub use loader::{standard_skill_dirs, Skill, SkillSet};
 pub use manifest::{SkillManifest, SkillTriggers};
 pub use suggest::{SkillDraft, SuggestionEngine};
+pub use templates::{standard_template_dirs, PromptTemplate, TemplateSet};

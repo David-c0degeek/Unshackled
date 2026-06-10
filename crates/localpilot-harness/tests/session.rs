@@ -923,3 +923,58 @@ async fn transcript_is_derivable_from_the_event_log() {
         assert_eq!(pair[1].parent_id, Some(pair[0].id));
     }
 }
+
+#[tokio::test]
+async fn user_shell_runs_are_auditable_and_context_exclusion_works() {
+    let provider = Arc::new(FakeProvider::new().text("ok"));
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig::default(),
+        Profile::Default,
+    );
+    let session = h.runtime.session_id();
+
+    // An excluded run: permission-gated, in the event log, not in context.
+    let excluded = h
+        .runtime
+        .run_user_shell("git", &["--version".to_string()], true)
+        .await;
+    assert!(!excluded.is_error, "{}", excluded.output);
+    assert!(h.store.read_transcript(session).unwrap().is_empty());
+
+    // An included run lands in the transcript as a shell-role message.
+    let included = h
+        .runtime
+        .run_user_shell("git", &["--version".to_string()], false)
+        .await;
+    assert!(!included.is_error, "{}", included.output);
+    let transcript = h.store.read_transcript(session).unwrap();
+    assert_eq!(transcript.len(), 1);
+    assert_eq!(transcript[0].role, localpilot_core::Role::UserShell);
+
+    // Both runs are auditable from the event log, and the transcript is still
+    // exactly the Message events.
+    let events = h.store.read_events(session).unwrap();
+    let shell_runs = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                localpilot_store::SessionEventKind::ToolFinished { name, .. } if name == "run_shell"
+            )
+        })
+        .count();
+    assert_eq!(shell_runs, 2);
+    assert_eq!(
+        localpilot_store::transcript_from_events(&events),
+        transcript
+    );
+
+    // The next model turn sees the included run but not the excluded one.
+    let reason = h.runtime.run_turn("hi", &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+    let request = provider.requests().pop().unwrap();
+    let roles: Vec<_> = request.messages.iter().map(|m| m.role).collect();
+    assert!(roles.contains(&localpilot_core::Role::UserShell));
+}

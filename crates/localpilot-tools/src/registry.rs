@@ -6,10 +6,17 @@ use localpilot_sandbox::{Approver, Decision, PermissionEngine, PermissionRequest
 use serde_json::Value;
 
 use crate::builtins::{
-    EditFile, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore, GitStatus, ListFiles,
-    MultiEdit, ReadFile, RunShell, SearchText, UpdatePlan, WriteFile,
+    ApplyPatch, EditFile, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore, GitStatus,
+    ListFiles, MultiEdit, ReadFile, ReadToolOutput, RunShell, SearchText, UpdatePlan, WriteFile,
 };
 use crate::tool::{Tool, ToolContext};
+
+/// Context-size bound on a tool result. Output beyond this is kept as head +
+/// tail in context, with the full text spilled to the retention store under
+/// the call id so `read_tool_output` can fetch it.
+const CONTEXT_OUTPUT_BYTES: usize = 16 * 1024;
+/// How much of the tail survives in context when output is bounded.
+const CONTEXT_TAIL_BYTES: usize = 2 * 1024;
 
 /// A set of tools. Dispatch is the single entry point: it authorizes every effect
 /// through the permission engine before invoking a tool and redacts every output,
@@ -36,7 +43,9 @@ impl ToolRegistry {
         registry.register(Box::new(ListFiles));
         registry.register(Box::new(FindFiles));
         registry.register(Box::new(SearchText));
+        registry.register(Box::new(ApplyPatch));
         registry.register(Box::new(RunShell));
+        registry.register(Box::new(ReadToolOutput));
         registry.register(Box::new(GitStatus));
         registry.register(Box::new(GitDiff));
         registry.register(Box::new(GitLog));
@@ -139,17 +148,79 @@ impl ToolRegistry {
 
         match tool.invoke(call.input.clone(), ctx).await {
             // Redaction happens here, for every profile including bypass.
-            Ok(output) => ToolResult {
-                id: call.id.clone(),
-                output: format_tool_output(tool.name(), &redact(&output.text), output.is_error),
-                is_error: output.is_error,
-            },
+            Ok(output) => {
+                let redacted = redact(&output.text);
+                let bounded = bound_output(tool.name(), &call.id, &redacted, ctx);
+                ToolResult {
+                    id: call.id.clone(),
+                    output: format_tool_output(tool.name(), &bounded, output.is_error),
+                    is_error: output.is_error,
+                }
+            }
             Err(err) => ToolResult::error(
                 call.id.clone(),
                 format_tool_output(tool.name(), &err.to_string(), true),
             ),
         }
     }
+}
+
+/// Bound an output to the context budget: keep the head and tail, spill the
+/// full (already redacted) text to the retention store under the call id, and
+/// say so explicitly — truncation is never silent.
+fn bound_output(
+    tool: &str,
+    id: &localpilot_core::ToolUseId,
+    text: &str,
+    ctx: &ToolContext<'_>,
+) -> String {
+    if text.len() <= CONTEXT_OUTPUT_BYTES || tool == "read_tool_output" {
+        return text.to_string();
+    }
+    let retention_note = match ctx.retention {
+        Some(retention) => {
+            let key = retention_key(id.as_str());
+            match retention.retain(&key, text) {
+                Ok(()) => {
+                    format!("full output retained under id {key}; use read_tool_output to fetch it")
+                }
+                Err(reason) => format!("full output could not be retained: {reason}"),
+            }
+        }
+        None => "full output was not retained in this session".to_string(),
+    };
+    let head_end = floor_char_boundary(text, CONTEXT_OUTPUT_BYTES - CONTEXT_TAIL_BYTES);
+    let tail_start = floor_char_boundary(text, text.len() - CONTEXT_TAIL_BYTES);
+    format!(
+        "{}\n... [output truncated: {} of {} bytes shown; {}] ...\n{}",
+        &text[..head_end],
+        CONTEXT_OUTPUT_BYTES,
+        text.len(),
+        retention_note,
+        &text[tail_start..]
+    )
+}
+
+/// A retention key derived from the provider-assigned call id, restricted to
+/// storage-safe characters.
+fn retention_key(call_id: &str) -> String {
+    let cleaned: String = call_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        .collect();
+    if cleaned.is_empty() {
+        "tool-output".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+    index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 impl Default for ToolRegistry {

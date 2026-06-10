@@ -613,6 +613,244 @@ impl Tool for SearchText {
     }
 }
 
+// --- apply_patch ------------------------------------------------------------
+
+/// A structured multi-file patch. The grammar is typed JSON generated from
+/// these structs (original to this repository): an ordered list of operations,
+/// each creating, updating (exact-match hunks), or deleting one file.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ApplyPatchInput {
+    /// Ordered file operations; the whole patch is validated before any write.
+    operations: Vec<PatchOperation>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum PatchOperation {
+    /// Create a new file (fails if the file already exists).
+    Create { path: String, content: String },
+    /// Apply exact-match hunks to an existing file, in order.
+    Update { path: String, hunks: Vec<PatchHunk> },
+    /// Delete an existing file.
+    Delete { path: String },
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PatchHunk {
+    /// Exact text to replace; must match exactly once at the point this hunk
+    /// is applied.
+    old_text: String,
+    /// Replacement text.
+    new_text: String,
+}
+
+impl PatchOperation {
+    fn path(&self) -> &str {
+        match self {
+            PatchOperation::Create { path, .. }
+            | PatchOperation::Update { path, .. }
+            | PatchOperation::Delete { path } => path,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            PatchOperation::Create { path, .. } => format!("create {path}"),
+            PatchOperation::Update { path, hunks } => {
+                format!("update {path} ({} hunks)", hunks.len())
+            }
+            PatchOperation::Delete { path } => format!("delete {path}"),
+        }
+    }
+}
+
+pub struct ApplyPatch;
+
+#[async_trait]
+impl Tool for ApplyPatch {
+    fn name(&self) -> &'static str {
+        "apply_patch"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        // The diff preview for the approval prompt: one line per operation.
+        let Ok(input) = serde_json::from_value::<ApplyPatchInput>(input.clone()) else {
+            return String::new();
+        };
+        let lines: Vec<String> = input
+            .operations
+            .iter()
+            .take(12)
+            .map(PatchOperation::describe)
+            .collect();
+        detail_preview(&lines.join("; "))
+    }
+    fn description(&self) -> &'static str {
+        "Apply a structured multi-file patch: create, update (exact-match hunks), or delete files. Validated atomically before any write."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<ApplyPatchInput>()
+    }
+    fn effects(&self, input: &Value, ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        let input: ApplyPatchInput = parse_input(input)?;
+        if input.operations.is_empty() {
+            return Err(ToolError::InvalidInput(
+                "operations must contain at least one file operation".to_string(),
+            ));
+        }
+        Ok(input
+            .operations
+            .iter()
+            .map(|op| {
+                let overwrite = !matches!(op, PatchOperation::Create { .. });
+                write_path_effect(ctx, Path::new(op.path()), overwrite)
+            })
+            .collect())
+    }
+    async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: ApplyPatchInput = parse_input(&input)?;
+
+        // Validate every operation against the current tree before any write,
+        // so a rejected hunk fails the whole patch with nothing applied.
+        let mut writes: Vec<(PathBuf, Option<String>)> = Vec::new();
+        for (index, op) in input.operations.iter().enumerate() {
+            let label = format!("operation {} ({})", index + 1, op.describe());
+            let path = ctx.workspace.normalize(Path::new(op.path()))?;
+            match op {
+                PatchOperation::Create { content, .. } => {
+                    if path.exists() {
+                        return Err(ToolError::Failed(format!(
+                            "{label}: the file already exists; use an update operation"
+                        )));
+                    }
+                    writes.push((path, Some(content.clone())));
+                }
+                PatchOperation::Update { hunks, .. } => {
+                    if hunks.is_empty() {
+                        return Err(ToolError::InvalidInput(format!(
+                            "{label}: hunks must contain at least one replacement"
+                        )));
+                    }
+                    let original = std::fs::read_to_string(&path)
+                        .map_err(|e| ToolError::Failed(format!("{label}: {e}")))?;
+                    let mut updated = original.clone();
+                    for (hunk_index, hunk) in hunks.iter().enumerate() {
+                        match updated.matches(&hunk.old_text).count() {
+                            0 => {
+                                return Err(ToolError::Failed(format!(
+                                    "{label}: hunk {} old_text was not found; \
+                                     re-read the file and resend the patch",
+                                    hunk_index + 1
+                                )))
+                            }
+                            1 => {
+                                updated = updated.replacen(&hunk.old_text, &hunk.new_text, 1);
+                            }
+                            n => {
+                                return Err(ToolError::Failed(format!(
+                                    "{label}: hunk {} old_text matches {n} times; \
+                                     provide a unique snippet",
+                                    hunk_index + 1
+                                )))
+                            }
+                        }
+                    }
+                    let newline = detect_newline(&original);
+                    writes.push((path, Some(apply_newline(&updated, newline))));
+                }
+                PatchOperation::Delete { .. } => {
+                    if !path.exists() {
+                        return Err(ToolError::Failed(format!(
+                            "{label}: the file does not exist"
+                        )));
+                    }
+                    writes.push((path, None));
+                }
+            }
+        }
+
+        // Apply. Each file write is atomic (temp-then-rename); validation
+        // above makes the whole patch all-or-nothing in practice.
+        let mut applied = Vec::new();
+        for ((path, content), op) in writes.iter().zip(&input.operations) {
+            match content {
+                Some(content) => atomic_write(path, content.as_bytes())?,
+                None => std::fs::remove_file(path)
+                    .map_err(|e| ToolError::Failed(format!("{}: {e}", path.display())))?,
+            }
+            applied.push(op.describe());
+        }
+        Ok(ToolOutput::ok(format!("applied: {}", applied.join("; "))))
+    }
+}
+
+// --- read_tool_output --------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ReadToolOutputInput {
+    /// The retention id from a truncated tool result.
+    id: String,
+    /// First line to include (1-based, inclusive).
+    #[serde(default)]
+    start_line: Option<usize>,
+    /// Last line to include (1-based, inclusive).
+    #[serde(default)]
+    end_line: Option<usize>,
+}
+
+/// Fetches the full output of an earlier tool call whose result was truncated
+/// in context and spilled to the retention store.
+pub struct ReadToolOutput;
+
+#[async_trait]
+impl Tool for ReadToolOutput {
+    fn name(&self) -> &'static str {
+        "read_tool_output"
+    }
+    fn description(&self) -> &'static str {
+        "Read the full retained output of an earlier tool call that was truncated in context, by its retention id, optionally a line range."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<ReadToolOutputInput>()
+    }
+    fn effects(&self, input: &Value, _ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        // Reads runtime state already mediated at capture time; no new side
+        // effect.
+        let _: ReadToolOutputInput = parse_input(input)?;
+        Ok(Vec::new())
+    }
+    async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: ReadToolOutputInput = parse_input(&input)?;
+        let Some(retention) = ctx.retention else {
+            return Err(ToolError::Failed(
+                "no retained output is available in this session".to_string(),
+            ));
+        };
+        let full = retention
+            .fetch(&input.id)
+            .map_err(ToolError::Failed)?
+            .ok_or_else(|| {
+                ToolError::Failed(format!("no retained output under id {}", input.id))
+            })?;
+        let selected = match (input.start_line, input.end_line) {
+            (None, None) => full,
+            (start, end) => {
+                let start = start.unwrap_or(1).max(1);
+                let end = end.unwrap_or(usize::MAX);
+                full.lines()
+                    .enumerate()
+                    .filter(|(i, _)| {
+                        let line = i + 1;
+                        line >= start && line <= end
+                    })
+                    .map(|(_, l)| l)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        };
+        Ok(cap(selected))
+    }
+}
+
 // --- run_shell --------------------------------------------------------------
 
 #[derive(Debug, Deserialize, JsonSchema)]

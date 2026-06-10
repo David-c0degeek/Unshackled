@@ -13,6 +13,11 @@ pub enum Role {
     User,
     Assistant,
     Tool,
+    /// A user-initiated shell run surfaced into the transcript. Delivered to
+    /// providers as user content when included; a run marked
+    /// exclude-from-context never becomes a message at all (it lives only in
+    /// the session event log).
+    UserShell,
 }
 
 /// A single message: an author, ordered content blocks, and optional metadata.
