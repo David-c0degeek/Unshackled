@@ -427,6 +427,7 @@ async fn run_harness_command(
         &mut rx,
         &cancel,
         started,
+        None,
         operation,
     )
     .await;
@@ -449,6 +450,9 @@ async fn run_turn(
     let (events, mut rx) = broadcast::channel::<RuntimeEvent>(1024);
     let cancel = CancellationToken::new();
     let started = std::time::Instant::now();
+    // Input submitted while the turn runs becomes steering: admitted at the
+    // next safe provider-turn boundary instead of being swallowed.
+    let steer = runtime.steer_queue();
     let turn = async {
         let _ = runtime.run_turn(prompt, &events, &cancel).await;
         Ok(())
@@ -460,11 +464,13 @@ async fn run_turn(
         &mut rx,
         &cancel,
         started,
+        Some(&steer),
         turn,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // the REPL event pump genuinely threads these
 async fn drive_runtime_operation<F, T>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     state: &mut AppState,
@@ -472,6 +478,7 @@ async fn drive_runtime_operation<F, T>(
     rx: &mut broadcast::Receiver<RuntimeEvent>,
     cancel: &CancellationToken,
     started: std::time::Instant,
+    steer: Option<&localpilot_harness::SteerQueue>,
     operation: F,
 ) -> anyhow::Result<T>
 where
@@ -496,7 +503,7 @@ where
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
-                    pending = resolve_event(state, pending, event::read()?, cancel);
+                    pending = resolve_event(state, pending, event::read()?, cancel, steer);
                 }
                 terminal.draw(|frame| render(frame, state))?;
             }
@@ -548,6 +555,7 @@ fn resolve_event(
     pending: Option<oneshot::Sender<bool>>,
     event: Event,
     cancel: &CancellationToken,
+    steer: Option<&localpilot_harness::SteerQueue>,
 ) -> Option<oneshot::Sender<bool>> {
     if let Some(reply) = pending {
         let Event::Key(key) = event else {
@@ -582,9 +590,23 @@ fn resolve_event(
                     cancel.cancel();
                 } else if is_newline(key, &state.input) {
                     state.insert_input_newline();
-                } else if !is_submit(key, &state.input)
-                    && !matches!(key.code, KeyCode::Enter | KeyCode::Esc)
-                {
+                } else if is_submit(key, &state.input) {
+                    // Submitting while a turn runs queues steering input,
+                    // admitted at the next safe provider-turn boundary.
+                    if let Some(steer) = steer {
+                        if !state.input.trim().is_empty() {
+                            let shown = std::mem::take(&mut state.input);
+                            state.input_cursor = 0;
+                            let prompt = state.expand_pastes(&shown);
+                            state.pastes.clear();
+                            steer.push(prompt);
+                            state.apply(UiEvent::UserMessage(shown));
+                            state.apply(UiEvent::Notice(
+                                "steering queued for the next safe boundary".to_string(),
+                            ));
+                        }
+                    }
+                } else if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
                     if let Some(mapped) = map_key(key) {
                         handle_input(state, AppInput::Key(mapped));
                     }
