@@ -1,4 +1,4 @@
-﻿# Extending LocalPilot
+# Extending LocalPilot
 
 Three extension points: providers (models), tools (capabilities), and MCP
 servers (external tools). All run through the same permission engine and
@@ -75,3 +75,27 @@ Every extension is gated by the permission engine
 in interactive mode and are denied non-interactively unless a trusting profile
 is set. Output is redacted before it reaches the transcript, the model, or the
 logs.
+
+## Hooks (in-process, trusted-only)
+
+The hook fabric (`localpilot-harness::HookFabric`) is the typed internal
+extension surface:
+
+- **Observers** — notify-only lifecycle listeners (turn start/end, tool
+  execution, compaction, recovery, quota, gate checks). They cannot mutate
+  the session or influence any decision.
+- **Context hooks** — may contribute system context before a turn, through
+  the same seeded-system path a host uses. LocalMind memory injection is the
+  built-in consumer.
+- **Tool gates** — tighten-only checks consulted *after* the permission
+  engine on every dispatch. A gate can block a call with a model-visible
+  reason; it can never grant what the engine refused. The permission engine
+  is the always-on first link of this chain and is not removable.
+
+**Third-party stance (fixed boundary):** hook code is in-process, compiled-in
+Rust — trusted by construction. LocalPilot does not load third-party code
+in-process (no dynamic libraries, no embedded scripting). External
+integrations run **out of process** — over the RPC or ACP stdio protocols
+(see [embedding.md](embedding.md)) or as MCP servers — where every action is
+mediated by the permission engine like any other tool source. A future plugin
+packaging story builds on this boundary; it does not relax it.

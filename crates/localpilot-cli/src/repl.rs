@@ -173,6 +173,9 @@ pub async fn run_chat(
         },
         Vec::new(),
     );
+    // Relevant accepted LocalMind memory is contributed per turn through the
+    // context-hook fabric.
+    crate::context_inject::register(&cwd, &mut runtime);
 
     let header = Header {
         version: env!("LOCALPILOT_VERSION").to_string(),
@@ -256,9 +259,6 @@ async fn event_loop(
                             run_slash(terminal, state, runtime, approval_rx, &host, action).await?;
                         } else {
                             state.apply(UiEvent::UserMessage(shown));
-                            // Seed relevant accepted memory for this prompt when
-                            // LocalMind has a match.
-                            crate::context_inject::seed(host.cwd, runtime, &prompt);
                             state.busy = true;
                             let outcome =
                                 run_turn(terminal, state, runtime, approval_rx, &prompt).await;

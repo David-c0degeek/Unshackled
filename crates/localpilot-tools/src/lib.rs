@@ -18,4 +18,4 @@ pub use builtins::{
 };
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use tool::{OutputRetention, Tool, ToolContext, ToolOutput};
+pub use tool::{GateVerdict, OutputRetention, Tool, ToolContext, ToolGate, ToolOutput};

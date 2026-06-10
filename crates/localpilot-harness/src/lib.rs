@@ -10,6 +10,7 @@ mod brief;
 mod compaction;
 mod decisions;
 mod error;
+mod hooks;
 mod planning;
 mod progress;
 mod quality;
@@ -23,6 +24,7 @@ pub use brief::Brief;
 pub use compaction::{compact, compact_with_summary, estimate_tokens};
 pub use decisions::{today, Decision, Decisions};
 pub use error::HarnessError;
+pub use hooks::{ContextHook, HookEvent, HookFabric, SessionObserver};
 pub use planning::{run_intake, run_plan, INTAKE_PROMPT, PLANNER_PROMPT};
 pub use progress::{Progress, Step};
 pub use quality::{

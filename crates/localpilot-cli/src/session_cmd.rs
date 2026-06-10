@@ -73,7 +73,7 @@ pub async fn print_mode(
         },
         Vec::new(),
     );
-    crate::context_inject::seed(&cwd, &mut runtime, prompt);
+    crate::context_inject::register(&cwd, &mut runtime);
 
     run_and_print(runtime, prompt).await
 }
