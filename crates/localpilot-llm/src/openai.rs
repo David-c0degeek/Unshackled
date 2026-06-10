@@ -101,6 +101,13 @@ impl OpenAiProvider {
         self
     }
 
+    /// Declare the model's context window, consumed by the session budget.
+    #[must_use]
+    pub fn with_max_context_tokens(mut self, tokens: Option<u64>) -> Self {
+        self.declaration.max_context_tokens = tokens;
+        self
+    }
+
     /// Build the JSON request body sent to `/chat/completions`.
     #[must_use]
     pub fn build_body(&self, request: &ModelRequest) -> Value {
@@ -123,6 +130,12 @@ impl OpenAiProvider {
                 }
                 map.insert(k.clone(), v.clone());
             }
+        }
+        // An explicit per-request effort overrides any option default; this is
+        // the documented `reasoning_effort` request field on effort-aware
+        // OpenAI-compatible servers.
+        if let Some(effort) = request.reasoning_effort {
+            body["reasoning_effort"] = json!(effort.as_str());
         }
         body
     }
@@ -1030,6 +1043,27 @@ mod tests {
             "a late system message is not reordered"
         );
         assert_eq!(wire[3]["content"], "project context: uses tokio");
+    }
+
+    #[test]
+    fn explicit_reasoning_effort_reaches_the_wire_and_overrides_defaults() {
+        let mut options = IndexMap::new();
+        options.insert("reasoning_effort".to_string(), json!("low"));
+        let provider = OpenAiProvider::new(
+            "local",
+            "Local",
+            SourceType::LocalServer,
+            "http://localhost:1234/v1",
+            None,
+        )
+        .with_default_options(options);
+        let request = ModelRequest::new("m", Vec::new())
+            .with_reasoning_effort(Some(crate::request::ReasoningEffort::High));
+        let body = provider.build_body(&request);
+        assert_eq!(body["reasoning_effort"], "high");
+        // Without an explicit request value the option default stands.
+        let body = provider.build_body(&ModelRequest::new("m", Vec::new()));
+        assert_eq!(body["reasoning_effort"], "low");
     }
 
     #[test]

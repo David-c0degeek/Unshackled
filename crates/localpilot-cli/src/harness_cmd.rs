@@ -468,7 +468,10 @@ where
             run.trusted,
             model,
             &mcp,
-            config.harness.context_token_limit,
+            localpilot_harness::effective_context_limit(
+                provider.declaration().max_context_tokens,
+                config.harness.context_token_limit,
+            ),
             gate_allowance.clone(),
             (run.approver)(),
         );

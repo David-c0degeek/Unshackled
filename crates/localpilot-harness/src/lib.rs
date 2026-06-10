@@ -1,4 +1,4 @@
-﻿//! Rule-enforced agent workflow and the shared session runtime.
+//! Rule-enforced agent workflow and the shared session runtime.
 //!
 //! Owns the agent-mode conversational loop (the shared loop both operating modes
 //! use), context compaction, the `brief.md` / `PROGRESS.md` document model, and
@@ -33,7 +33,8 @@ pub use quality::{
 pub use resume::{resume_one_step, resume_one_step_with_events, ResumeOutcome, QUOTA_PAUSE_KEY};
 pub use rules::{trigger_for_cadence, Rule, RuleContext, RuleEngine, Trigger, Verdict};
 pub use session::{
-    ManualCompaction, PlanStep, RuntimeEvent, SessionConfig, SessionRuntime, StopReason,
+    effective_context_limit, ManualCompaction, PlanStep, RuntimeEvent, SessionConfig,
+    SessionRuntime, StopReason,
 };
 pub use system_prompt::agent_system_prompt;
 // Part of the public `RuntimeEvent::Recovery` payload, so consumers can match it.

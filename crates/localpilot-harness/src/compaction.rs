@@ -70,8 +70,35 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         .iter()
         .take_while(|m| m.role == Role::System)
         .count();
-    let system = messages[..system_count].to_vec();
+    let mut system = messages[..system_count].to_vec();
     let body = &messages[system_count..];
+
+    // Iterative compaction: a summary injected by an earlier compaction is
+    // carried forward into the next digest instead of accumulating as extra
+    // system messages.
+    let mut carried: Vec<String> = Vec::new();
+    system.retain(|message| match first_text(message) {
+        Some(text) if text.starts_with(SUMMARY_TITLE) => {
+            carried.extend(
+                text.lines()
+                    .skip(1)
+                    .map(|line| line.trim_start_matches("- ").to_string()),
+            );
+            false
+        }
+        _ => true,
+    });
+    let fold_carried = |summary: Option<StructuredSummary>| -> Option<StructuredSummary> {
+        const MAX_ENTRIES: usize = 8;
+        if carried.is_empty() {
+            return summary;
+        }
+        let mut entries = carried.clone();
+        entries.extend(summary.map(|s| s.entries).unwrap_or_default());
+        let excess = entries.len().saturating_sub(MAX_ENTRIES);
+        entries.drain(..excess);
+        Some(StructuredSummary::new(SUMMARY_TITLE, entries))
+    };
 
     // Group the body into exchanges that each start at a user message, so a tool
     // call and its result always live in the same exchange.
@@ -100,7 +127,7 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         dropped.push(exchanges.remove(0));
     }
 
-    let mut summary = structured_summary(&dropped);
+    let mut summary = fold_carried(structured_summary(&dropped));
 
     // If a single very large recent window still exceeds the limit, keep
     // removing whole oldest exchanges before considering the summary. Removing
@@ -109,13 +136,17 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         && estimate_tokens(&build_messages(&system, summary.as_ref(), &exchanges)) > token_limit
     {
         dropped.push(exchanges.remove(0));
-        summary = structured_summary(&dropped);
+        summary = fold_carried(structured_summary(&dropped));
     }
 
     let mut out = build_messages(&system, summary.as_ref(), &exchanges);
     if estimate_tokens(&out) > token_limit && !dropped.is_empty() {
         for (max_exchanges, max_user_chars) in [(4, 60), (2, 60), (1, 60), (1, 30)] {
-            summary = structured_summary_with(&dropped, max_exchanges, max_user_chars);
+            summary = fold_carried(structured_summary_with(
+                &dropped,
+                max_exchanges,
+                max_user_chars,
+            ));
             out = build_messages(&system, summary.as_ref(), &exchanges);
             if estimate_tokens(&out) <= token_limit {
                 break;
@@ -135,7 +166,9 @@ pub fn compact_with_summary(messages: Vec<Message>, token_limit: usize) -> Compa
         truncate_oldest_tool_results(&mut out, token_limit);
     }
 
-    let digest = summary.unwrap_or_else(|| {
+    // Even when the summary message was dropped to fit the budget, the result
+    // digest keeps the carried entries so the event log loses nothing.
+    let digest = summary.or_else(|| fold_carried(None)).unwrap_or_else(|| {
         StructuredSummary::new(
             SUMMARY_TITLE,
             vec!["older exchanges were trimmed".to_string()],
@@ -456,6 +489,46 @@ mod tests {
         let summary = result.summary.expect("a digest of what was trimmed");
         assert_eq!(summary.title, SUMMARY_TITLE);
         assert!(!summary.entries.is_empty());
+    }
+
+    #[test]
+    fn a_previous_summary_feeds_the_next_compaction() {
+        // First compaction produces a summary; a manually compacted history
+        // carries it as a system message. The next compaction folds those
+        // entries into the new digest instead of stacking summary messages.
+        let mut messages = vec![
+            Message::text(Role::System, "sys"),
+            Message::text(
+                Role::System,
+                format!(
+                    "{SUMMARY_TITLE}
+- user asked: earlier work"
+                ),
+            ),
+        ];
+        for i in 0..6 {
+            messages.push(user(&format!("turn {i} {}", "x".repeat(120))));
+            messages.extend(tool_exchange(&format!("call_{i}")));
+        }
+
+        let result = compact_with_summary(messages, 320);
+        assert!(result.compacted);
+        let summary = result.summary.expect("a digest");
+        assert!(
+            summary.entries.iter().any(|e| e.contains("earlier work")),
+            "carried entries: {:?}",
+            summary.entries
+        );
+        // Exactly one summary system message in the output.
+        let summary_messages = result
+            .messages
+            .iter()
+            .filter(|m| {
+                m.role == Role::System
+                    && first_text(m).is_some_and(|t| t.starts_with(SUMMARY_TITLE))
+            })
+            .count();
+        assert_eq!(summary_messages, 1);
     }
 
     #[test]

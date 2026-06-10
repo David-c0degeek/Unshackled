@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod anthropic;
+mod discovery;
 mod error;
 mod event;
 mod fake;
@@ -20,6 +21,7 @@ mod request;
 mod retry;
 
 pub use anthropic::AnthropicProvider;
+pub use discovery::{discover_models, DiscoveredModel};
 pub use error::{ProviderError, QuotaInfo};
 pub use event::{ModelEvent, ModelEventStream};
 pub use fake::FakeProvider;
@@ -29,7 +31,7 @@ pub use provider::{
     ReasoningShape, SourceType, ToolCallShape,
 };
 pub use registry::ProviderRegistry;
-pub use request::{ModelRequest, ToolSpec};
+pub use request::{ModelRequest, ReasoningEffort, ToolSpec};
 pub use retry::{retry, RetryPolicy};
 
 #[cfg(test)]

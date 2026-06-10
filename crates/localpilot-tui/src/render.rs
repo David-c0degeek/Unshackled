@@ -1,4 +1,4 @@
-﻿//! Rendering. A single [`render`] draws the whole UI from [`AppState`]; it is
+//! Rendering. A single [`render`] draws the whole UI from [`AppState`]; it is
 //! pure with respect to the state, so it snapshot-tests cleanly with a
 //! `TestBackend`.
 
@@ -357,11 +357,19 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
         Style::default()
     };
 
+    // The context figure is the bytes/4 estimate against the session budget
+    // (the model's real window minus a response reserve when known); the tilde
+    // states the basis.
+    let effort = f
+        .effort
+        .as_deref()
+        .map(|level| format!(" effort:{level}"))
+        .unwrap_or_default();
     let line1 = Line::from(vec![
         Span::raw(format!("mode:{} ", state.mode.label())),
         Span::styled(format!("profile:{} ", state.profile.label()), profile_style),
         Span::raw(format!(
-            "tok in/out:{}/{} {:.0} t/s ctx:{context}",
+            "tok in/out:{}/{} {:.0} t/s ctx:~{context}{effort}",
             f.tokens_in, f.tokens_out, f.tokens_per_sec
         )),
     ]);

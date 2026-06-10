@@ -52,6 +52,10 @@ pub async fn print_mode(
     .cloned()
     .ok_or_else(|| anyhow::anyhow!("no provider is configured"))?;
 
+    let context_token_limit = localpilot_harness::effective_context_limit(
+        provider.declaration().max_context_tokens,
+        config.harness.context_token_limit,
+    );
     let mut runtime = SessionRuntime::new(
         provider,
         crate::mcp::McpTools::load(&config).await.registry(),
@@ -64,7 +68,7 @@ pub async fn print_mode(
             model: model.to_string(),
             interactivity: Interactivity::NonInteractive,
             trusted: allow_writes,
-            context_token_limit: config.harness.context_token_limit,
+            context_token_limit,
             ..SessionConfig::default()
         },
         Vec::new(),
