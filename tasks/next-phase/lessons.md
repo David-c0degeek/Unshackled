@@ -13,3 +13,10 @@
   `anthropic-ratelimit-*-reset` headers; the adapter currently never fills
   `reset_at`. Fix alongside the OpenAI duration-string parse (01.5) so both
   adapters surface machine-readable resets.
+- 2026-06-10 (subject 02): tightening a permission rule can break a feature
+  that *depends* on the looser rule — the ratified quality gate (ADR-0009)
+  runs headless precisely because the allowlist lifts a non-interactive
+  low-risk deny. Before narrowing a security primitive, grep for callers that
+  treat the current behavior as a grant mechanism (here:
+  `QUALITY_CHECK_TOOL`). The behavior test caught it; design review should
+  have first.

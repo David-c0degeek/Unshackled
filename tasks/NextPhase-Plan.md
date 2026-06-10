@@ -183,7 +183,7 @@ must not re-enter via any box (D002).
 | Dep hygiene | `cargo machete` | on dependency change only |
 | Release hygiene | `cargo deny check` and `cargo audit` | before a release milestone only |
 | Plan-specific gate (tool pairing) | `cargo test -p localpilot-harness --test pairing` | pairing invariant: scenario tests + 48-case property run (01.2) |
-| Plan-specific gate (permissions) | TBD | filled by 02.2 once the tests exist |
+| Plan-specific gate (permissions) | `cargo test -p localpilot-sandbox` and `cargo test -p localpilot-tools --test tools` | allowlist floor, wrapper classification, destructive git flags, approval detail, binary overwrite (02.2/02.3/02.4/02.7) |
 
 ---
 
@@ -222,6 +222,8 @@ must not re-enter via any box (D002).
 | D004 | 2026-06-09 | Compaction work split across subjects | Compaction *correctness* fixes (oversized-exchange truncation pass, incremental flood check, cached result) land in subject 03; the *window-relative* trigger and iterative summary land in subject 04. | Window-relative math needs real per-model context windows, which only exist after the catalog (04). Sequencing them together would stall the correctness fixes behind the catalog. | 03.6, 04.6; review-technical §3.2–§3.4; research §5.4 |
 | D005 | 2026-06-10 | Blank-id tool calls are filtered, not synthesized | 01.1's box literal says "synthesize an error tool_result per unexecuted call". A call whose id is blank can never be validly answered (a tool_result must reference a non-empty tool_use id), so the loop validates *before* persisting: blank-id `tool_use` blocks never enter history, and the model is corrected via a persisted user message instead; calls with usable ids get the synthesized rejection result as specified. | Pairing the unpairable would re-violate the wire contract the box exists to protect. Filtering keeps the invariant trivially true for the degenerate case and synthesizes results for every answerable call. | 01.1, 01.2; `tasks/next-phase/01-wire-contract-and-streaming.md` |
 | D006 | 2026-06-10 | Late system messages are positional on every wire | A mid-conversation system message keeps its position: OpenAI-style wires send it in place as `role:"system"`; the Anthropic-style wire hoists only the *leading* system run and delivers later system content as user-role blocks at its original position. Spec text in docs/04 §Late System Messages. | The previous behavior silently time-traveled late system content to the front on one wire only — same history, different model-visible conversation per provider. Positional delivery is the only semantics that is uniform and preserves author intent. | 01.8; docs/04 |
+| D007 | 2026-06-10 | Bypass scope documented, not implemented as containment | The bypass workspace-boundary claim is scoped honestly: bypass keeps the boundary for path-bearing (file-tool) effects only; shell commands carry no path information and are auto-allowed without containment. Code comment, docs/07, and behavior now agree; no command path-containment story is built in this plan. | Command path containment requires parsing arbitrary argv for path-bearing arguments — heuristic, bypassable, and a false promise. An honest scope statement ("treat bypass as full shell access") protects users better than implied containment that does not exist. Captured in ADR-0010 (proposed); pending product-owner approval (02.8). | 02.5; docs/07; docs/10 ADR-0010 |
+| D008 | 2026-06-10 | Allowlist floor preserves the headless gate allowance | The floor-aware allowlist auto-approves relaxable (low-risk) effects in *any* interactivity rather than only relaxing interactive `Ask`: lifting the non-interactive deny for ReadOnly/ProjectWrite/Network is exactly the mechanism the ratified quality gate (ADR-0009) uses to run headless. Destructive/Privileged/Unknown/ExternalWrite commands, secret reads, and out-of-workspace paths are never relaxed in any mode. | First implementation relaxed only `Ask` and broke `ratification_allowance_lets_the_gate_run_headless_but_grants_nothing_else`; the ratification allowance is a documented dependency of the relaxed profile. | 02.2; docs/07; ADR-0009 |
 
 ---
 
@@ -236,7 +238,7 @@ must not re-enter via any box (D002).
 |---|---|---|---|---|---|
 | [x] | 00 | `tasks/next-phase/00-tooling-research-and-readiness.md` | DONE | agent: 8 | n/a |
 | [x] | 01 | `tasks/next-phase/01-wire-contract-and-streaming.md` | DONE | agent: 8 | n/a |
-| [ ] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | TODO | agent: 7; product-owner: 1 | yes |
+| [ ] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | WAITING-APPROVAL (agent boxes done; 02.8 product-owner open) | agent: 7; product-owner: 1 | yes |
 | [ ] | 03 | `tasks/next-phase/03-durable-session-events.md` | TODO | agent: 6; product-owner: 1 | yes |
 | [ ] | 04 | `tasks/next-phase/04-model-catalog-and-budgets.md` | TODO | agent: 6; product-owner: 1 | yes |
 | [ ] | 05 | `tasks/next-phase/05-headless-drive-rpc-acp.md` | TODO | agent: 5 | n/a |
