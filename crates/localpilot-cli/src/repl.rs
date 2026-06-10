@@ -140,6 +140,14 @@ pub async fn run_chat(
     .cloned()
     .ok_or_else(|| anyhow::anyhow!("no provider is configured"))?;
 
+    // The real context window: per-provider config first, then best-effort
+    // discovery from the local server's model listing. Failure means falling
+    // back to the configured global budget, never an error.
+    let mut context_window = provider.declaration().max_context_tokens;
+    if context_window.is_none() {
+        context_window = discovered_window(&config, provider_id, &model).await;
+    }
+
     // Ask-gated actions suspend the turn and prompt in the TUI; the user's
     // y/n answer flows back through this channel to the permission engine.
     let (approval_tx, mut approval_rx) = mpsc::unbounded_channel::<ApprovalCall>();
@@ -157,7 +165,10 @@ pub async fn run_chat(
             model: model.to_string(),
             interactivity: Interactivity::Interactive,
             trusted: profile == Profile::Bypass,
-            context_token_limit: config.harness.context_token_limit,
+            context_token_limit: localpilot_harness::effective_context_limit(
+                context_window,
+                config.harness.context_token_limit,
+            ),
             ..SessionConfig::default()
         },
         Vec::new(),
@@ -287,6 +298,21 @@ async fn run_slash(
             runtime.set_permission_profile(sandbox_profile(profile), Vec::new());
         }
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::SetEffort(level) => match localpilot_llm::ReasoningEffort::parse(&level) {
+            Some(effort) => {
+                runtime.set_reasoning_effort(Some(effort));
+                state.footer.effort = Some(effort.as_str().to_string());
+                state.apply(UiEvent::Notice(format!(
+                    "reasoning effort set to {}",
+                    effort.as_str()
+                )));
+            }
+            None => {
+                state.apply(UiEvent::Notice(format!(
+                    "invalid effort {level:?}; use minimal, low, medium, or high"
+                )));
+            }
+        },
         SlashAction::Clear => {
             runtime.clear_conversation();
             state.clear_conversation_view();
@@ -685,6 +711,34 @@ fn sandbox_profile(profile: UiProfile) -> Profile {
         UiProfile::Relaxed => Profile::Relaxed,
         UiProfile::Bypass => Profile::Bypass,
     }
+}
+
+/// Best-effort context window for `model` from the provider's own model
+/// listing, when the provider speaks the OpenAI-compatible protocol and a base
+/// URL is known. Silent on failure: discovery is metadata, not a gate.
+async fn discovered_window(
+    config: &localpilot_config::Config,
+    provider_id: Option<&str>,
+    model: &str,
+) -> Option<u64> {
+    let id = provider_id.unwrap_or(&config.provider.default);
+    let entry = config.providers.get(id)?;
+    if entry.kind == "anthropic" {
+        return None;
+    }
+    let base_url = entry.base_url.clone().or_else(|| {
+        std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })?;
+    let credential = config.resolve_credential(id);
+    let models = localpilot_llm::discover_models(&base_url, credential.as_ref())
+        .await
+        .ok()?;
+    models
+        .into_iter()
+        .find(|m| m.id == model)
+        .and_then(|m| m.context_window)
 }
 
 fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {

@@ -48,10 +48,15 @@ pub enum SlashAction {
     Clear,
     Compact,
     Search(Option<String>),
+    /// Set the reasoning-effort level (validated by the host).
+    SetEffort(String),
     Resume,
     WaitResume,
     Quit,
-    Invalid { command: String, reason: String },
+    Invalid {
+        command: String,
+        reason: String,
+    },
     Unknown(String),
 }
 
@@ -69,6 +74,11 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
         _ if name == "relaxed" && args.is_empty() => SlashAction::SetProfile(Profile::Relaxed),
         _ if name == "bypass" && args.is_empty() => SlashAction::SetProfile(Profile::Bypass),
         _ if matches!(name, "think" | "thinking") && args.is_empty() => SlashAction::ToggleThinking,
+        _ if name == "effort" && !args.is_empty() => SlashAction::SetEffort(args.to_string()),
+        _ if name == "effort" => SlashAction::Invalid {
+            command: "effort".to_string(),
+            reason: "usage: /effort minimal|low|medium|high".to_string(),
+        },
         _ if name == "clear" && args.is_empty() => SlashAction::Clear,
         _ if name == "compact" && args.is_empty() => SlashAction::Compact,
         _ if name == "search" => {
@@ -193,6 +203,9 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
         SlashAction::SetMode(mode) => state.mode = mode,
         SlashAction::SetProfile(profile) => state.profile = profile,
         SlashAction::ToggleThinking => state.thinking.visible = !state.thinking.visible,
+        SlashAction::SetEffort(level) => {
+            state.apply(UiEvent::Notice(format!("reasoning effort: {level}")));
+        }
         SlashAction::Clear => {
             state.clear_conversation_view();
             state.apply(UiEvent::Notice("conversation cleared".to_string()));

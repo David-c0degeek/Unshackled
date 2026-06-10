@@ -105,6 +105,9 @@ pub struct SessionConfig {
     pub interactivity: Interactivity,
     pub trusted: bool,
     pub context_token_limit: usize,
+    /// Requested reasoning effort for provider turns; mapped (or no-op
+    /// clamped) per provider. Switchable mid-session.
+    pub reasoning_effort: Option<localpilot_llm::ReasoningEffort>,
     /// How many times to retry a transient connection failure (network or
     /// 5xx) before giving up, with exponential backoff between attempts.
     pub max_stream_retries: u32,
@@ -119,8 +122,30 @@ impl Default for SessionConfig {
             interactivity: Interactivity::Interactive,
             trusted: true,
             context_token_limit: 24_000,
+            reasoning_effort: None,
             max_stream_retries: 3,
         }
+    }
+}
+
+/// Tokens held back from the model's context window for the response and
+/// protocol overhead when deriving the session budget from a real window.
+const CONTEXT_RESERVE_TOKENS: usize = 4_096;
+
+/// The session's effective context budget: the model's real window minus a
+/// response reserve when the window is known (per-provider `context_window`
+/// or discovery), otherwise the configured global limit. Estimates feeding
+/// this budget are the bytes/4 heuristic — see docs/providers.md for its bias.
+#[must_use]
+pub fn effective_context_limit(window: Option<u64>, configured: usize) -> usize {
+    match window {
+        Some(window) => {
+            let window = usize::try_from(window).unwrap_or(usize::MAX);
+            window
+                .saturating_sub(CONTEXT_RESERVE_TOKENS)
+                .max(CONTEXT_RESERVE_TOKENS)
+        }
+        None => configured,
     }
 }
 
@@ -297,6 +322,19 @@ impl SessionRuntime {
     /// hosts use this when a slash command changes profile mid-session.
     pub fn set_permission_profile(&mut self, profile: Profile, allowlist: Vec<String>) {
         self.engine = PermissionEngine::new(profile, allowlist);
+    }
+
+    /// Set the reasoning effort for subsequent turns — switchable from the
+    /// REPL, and overridable per harness step (high for planning, low for
+    /// mechanical edits).
+    pub fn set_reasoning_effort(&mut self, effort: Option<localpilot_llm::ReasoningEffort>) {
+        self.config.reasoning_effort = effort;
+    }
+
+    /// The currently requested reasoning effort.
+    #[must_use]
+    pub fn reasoning_effort(&self) -> Option<localpilot_llm::ReasoningEffort> {
+        self.config.reasoning_effort
     }
 
     /// Clear user/assistant/tool history while preserving the leading setup
@@ -493,8 +531,9 @@ impl SessionRuntime {
             // Fold the compaction summary into the single leading system block
             // so providers never receive two consecutive system messages.
             let request_messages = crate::compaction::merge_consecutive_system(compacted.messages);
-            let request =
-                ModelRequest::new(self.config.model.clone(), request_messages).with_tools(tools);
+            let request = ModelRequest::new(self.config.model.clone(), request_messages)
+                .with_tools(tools)
+                .with_reasoning_effort(self.config.reasoning_effort);
 
             self.record_event(SessionEventKind::TurnStarted {
                 model: self.config.model.clone(),
@@ -878,5 +917,19 @@ fn quota_reset_label(quota: &QuotaInfo) -> String {
         format!("{kind} limit reached")
     } else {
         "rate limited".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_limit_derives_from_a_known_window_with_a_reserve() {
+        assert_eq!(effective_context_limit(Some(32_768), 24_000), 28_672);
+        // The configured global limit is the fallback only.
+        assert_eq!(effective_context_limit(None, 24_000), 24_000);
+        // A tiny window never collapses below the reserve floor.
+        assert_eq!(effective_context_limit(Some(1_024), 24_000), 4_096);
     }
 }

@@ -241,7 +241,7 @@ must not re-enter via any box (D002).
 | [x] | 01 | `tasks/next-phase/01-wire-contract-and-streaming.md` | DONE | agent: 8 | n/a |
 | [x] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | DONE | agent: 7; product-owner: 1 | yes |
 | [x] | 03 | `tasks/next-phase/03-durable-session-events.md` | DONE | agent: 6; product-owner: 1 | yes |
-| [ ] | 04 | `tasks/next-phase/04-model-catalog-and-budgets.md` | TODO (slimmed per D009) | agent: 5; abandoned: 2 | yes |
+| [x] | 04 | `tasks/next-phase/04-model-catalog-and-budgets.md` | DONE (slimmed per D009) | agent: 5; abandoned: 2 | yes |
 | [ ] | 05 | `tasks/next-phase/05-headless-drive-rpc-acp.md` | TODO | agent: 5 | n/a |
 | [ ] | 06 | `tasks/next-phase/06-hook-fabric-and-lifecycle.md` | TODO | agent: 5 | n/a |
 | [x] | 07 | `tasks/next-phase/07-tools-skills-supply-chain.md` | DONE | agent: 6 | n/a |

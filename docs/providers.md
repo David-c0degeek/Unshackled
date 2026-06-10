@@ -22,6 +22,10 @@ model = "your-local-model"
 api_key_env = "LOCALPILOT_LOCAL_API_KEY"
 # Optional for slow local inference:
 request_timeout_secs = 600
+# Optional: the model's context window in tokens. When set, the session
+# budget becomes (window - response reserve) instead of the global
+# [harness] context_token_limit:
+# context_window = 32768
 ```
 
 TLS is not required for `localhost`.
@@ -106,6 +110,32 @@ providers: when true, assistant reasoning is replayed to the server as the
 convention used by vLLM-style servers). The default is on for local and custom
 endpoints and off for the official hosted API, which does not document those
 fields. The switch itself is never forwarded as a raw API field.
+
+## Model discovery
+
+`localpilot models` queries each configured OpenAI-compatible server's public
+`GET /models` listing and prints what is actually loaded, with the context
+window where the server reports one. The request is a network effect and
+passes the permission engine like any other. In the interactive REPL the same
+listing is consulted at startup (best-effort, silent on failure) to derive the
+session budget when no `context_window` is configured.
+
+## Reasoning effort
+
+`/effort minimal|low|medium|high` in the REPL sets a typed reasoning-effort
+level for subsequent turns. On effort-aware OpenAI-compatible servers it maps
+to the documented `reasoning_effort` request field; on protocol shapes without
+one it clamps to a no-op. Harness integrations can set it per step via the
+session runtime.
+
+## Context estimates
+
+Context usage figures are a bytes/4 heuristic, not a tokenizer count: they
+over-count CJK text (up to ~3x) and under-count dense code. The TUI footer
+marks the figure with `~` to state that basis. The session budget the figure
+is measured against is the model's real context window minus a response
+reserve when the window is known (config `context_window` or discovery), and
+the global `[harness] context_token_limit` otherwise.
 
 ## Evals
 

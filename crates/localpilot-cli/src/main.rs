@@ -1,4 +1,4 @@
-﻿use std::io::{self, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -18,6 +18,7 @@ mod learning_cmd;
 mod logging;
 mod mcp;
 mod memory_cmd;
+mod models_cmd;
 #[cfg(feature = "tui")]
 mod repl;
 mod session_cmd;
@@ -37,6 +38,12 @@ struct Cli {
 enum Command {
     /// Report version, platform, config, providers, tools, and trust state.
     Doctor,
+    /// List the models configured local servers actually have loaded.
+    Models {
+        /// Only query this configured provider id.
+        #[arg(long)]
+        provider: Option<String>,
+    },
     /// Check the project repository for a newer release and optionally update.
     Update {
         /// Only report whether an update is available; do not install.
@@ -342,6 +349,9 @@ async fn main() -> anyhow::Result<()> {
             let mut stdout = io::stdout().lock();
             doctor::run(&mut stdout)?;
             stdout.flush()?;
+        }
+        Command::Models { provider } => {
+            models_cmd::run(provider.as_deref()).await?;
         }
         Command::Update { check } => {
             let mut stdout = io::stdout().lock();

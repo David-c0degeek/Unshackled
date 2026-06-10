@@ -1,4 +1,4 @@
-﻿//! Configuration schema.
+//! Configuration schema.
 //!
 //! These types mirror `.localpilot.toml`. They are deliberately permissive about
 //! unknown provider options (preserved under [`ProviderConfig::options`]) so a
@@ -82,6 +82,11 @@ pub struct ProviderConfig {
     /// adapters; this override is useful for slow local inference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout_secs: Option<u64>,
+    /// The model's context window in tokens. When set, the session budget is
+    /// derived from it (window minus a response reserve) and takes precedence
+    /// over the global `[harness] context_token_limit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     /// Ask adapters to avoid optional thinking/reasoning output where the
     /// provider exposes a documented request shape for that behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]

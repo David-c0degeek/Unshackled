@@ -1,4 +1,4 @@
-﻿//! Provider registry: resolve configuration into live providers.
+//! Provider registry: resolve configuration into live providers.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -87,7 +87,8 @@ fn build_provider(
         return Ok(Arc::new(
             AnthropicProvider::new(id, id, base_url, credential)
                 .with_timeout(timeout)
-                .with_default_options(options),
+                .with_default_options(options)
+                .with_max_context_tokens(entry.context_window),
         ));
     }
 
@@ -120,7 +121,8 @@ fn build_provider(
     Ok(Arc::new(
         OpenAiProvider::new(id, id, source_type, base_url, credential)
             .with_timeout(timeout)
-            .with_default_options(options),
+            .with_default_options(options)
+            .with_max_context_tokens(entry.context_window),
     ))
 }
 
@@ -155,6 +157,7 @@ mod tests {
             api_key_env: None,
             model: None,
             request_timeout_secs: None,
+            context_window: None,
             suppress_thinking: None,
             options: Default::default(),
         }

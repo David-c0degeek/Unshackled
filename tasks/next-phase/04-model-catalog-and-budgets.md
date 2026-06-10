@@ -24,30 +24,30 @@ Requires subjects 01–03 `DONE` (D001, D004).
 - [x] ~~**04.2** (product-owner) Sign off the models.dev license/attribution
       and the vendoring approach before the snapshot lands in-repo.~~
       ABANDONED; see D009 (no snapshot lands in this plan).
-- [ ] **04.3** (agent) Per-model context limits wired end-to-end: the declared
+- [x] **04.3** (agent) Per-model context limits wired end-to-end: the declared
       `max_context_tokens` plumbing is populated from provider config (a
       `context_window` per provider/model) and from 04.4 discovery where the
       server reports it, and consumed by the session budget, replacing the
       lone global default. (Review §5.4; re-sourced per D009.)
-- [ ] **04.4** (agent) Dynamic local discovery: query OpenAI-compatible
+- [x] **04.4** (agent) Dynamic local discovery: query OpenAI-compatible
       `/v1/models` on configured local servers (Ollama/llama.cpp/vLLM/local
       gateways) and surface what is actually loaded in `localpilot models`;
       merge reported metadata (context length where present) into the
       session's model info. Network effect goes through the permission
       engine. (Research §5.5.)
-- [ ] **04.5** (agent) Reasoning effort as a typed control: an effort level on
+- [x] **04.5** (agent) Reasoning effort as a typed control: an effort level on
       the request model and provider contract, mapped per provider
       (reasoning-effort field where the protocol shape supports it; explicit
       no-op clamp for models without it), switchable in the REPL, and
       overridable per harness step (e.g. high for planning, low for mechanical
       edits). Depends on 01.3's correct reasoning-stream handling. (Research
       §5.6; catalog-aware clamping dropped per D009.)
-- [ ] **04.6** (agent) Window-relative, iterative compaction: trigger becomes
+- [x] **04.6** (agent) Window-relative, iterative compaction: trigger becomes
       `context_window − reserve` using the real window from config/discovery;
       the previous summary feeds into the next compaction. Token-estimator
       bias is documented, and the user-visible context-usage number states its
       basis. (Research §5.4; review §3.3; D004.)
-- [ ] **04.7** (agent) Surfacing: `doctor` and the TUI footer show model and
+- [x] **04.7** (agent) Surfacing: `doctor` and the TUI footer show model and
       context usage against the real window. (Research §5.11; cost metadata
       dropped per D009 — no catalog to source it from.)
 
@@ -63,8 +63,33 @@ Requires subjects 01–03 `DONE` (D001, D004).
 > subject open, add/reopen boxes or update decisions/lessons, and rerun this
 > checkpoint after the fixes.
 
-- [ ] Captain Hindsight review recorded
-- [ ] Verdict is `CLOSE`
+- [x] Captain Hindsight review recorded
+- [x] Verdict is `CLOSE`
+
+**Captain Hindsight review (2026-06-10):**
+
+1. **Keep:** one budget rule (`effective_context_limit`: window − reserve when
+   known, configured fallback otherwise) used by every runtime build site, so
+   REPL/print/harness cannot drift. Discovery as best-effort metadata with a
+   typed-error boundary — never a gate, never a startup failure. The typed
+   `ReasoningEffort` with an explicit no-op clamp on the wire that lacks an
+   effort field, instead of pretending a mapping exists. Iterative compaction
+   folds the prior summary instead of stacking summary messages, and the
+   digest keeps carried entries even when the summary message is dropped for
+   budget.
+2. **Fix before closing:** doctor and TUI snapshot updates reviewed
+   deliberately (footer gained `~` basis + effort; doctor gained model/window
+   per provider) before accepting.
+3. **Record:** D009 executed as written. Per-provider `context_window` beats
+   the global limit by design (more specific wins); documented in
+   providers.md. Anthropic extended-thinking mapping deliberately deferred —
+   enabling it changes the stream contract and belongs to its own change.
+4. **Risk:** discovery context fields are non-standard (`context_length`,
+   `max_model_len`, `max_context_length`, `n_ctx`); a server using another
+   name degrades to "unknown", which is safe (configured fallback applies).
+   REPL startup discovery adds one 5s-bounded request against the already-
+   configured provider endpoint; failure is silent by design.
+5. **Verdict:** CLOSE.
 
 ## Progress log
 > One line per slice. Date · slice number (per-subject, starting at 1) · box
@@ -75,3 +100,15 @@ Requires subjects 01–03 `DONE` (D001, D004).
 - 2026-06-10 · slice 0 · 04.1, 04.2 · Slimmed to local-first per product-owner
   direction (D009): catalog vendoring and its sign-off abandoned; remaining
   boxes re-sourced from config + local discovery. No code shipped this slice.
+- 2026-06-10 · slice 1 · 04.3–04.7 · Per-provider `context_window` config
+  threaded into provider declarations; `effective_context_limit`
+  (window − 4096 reserve, configured fallback) at every runtime build site;
+  `discover_models` (`GET /models`, best-effort context fields) +
+  permission-gated `localpilot models` command + silent REPL startup merge;
+  typed `ReasoningEffort` (OpenAI `reasoning_effort` mapping, Anthropic no-op
+  clamp, `/effort` REPL switch, runtime setter for per-step overrides);
+  iterative compaction summary fold; estimator bias documented and footer
+  states basis (`ctx:~`); doctor shows model + context window. Verified:
+  fmt/clippy (incl. tui,learning features)/full workspace tests green;
+  doctor + TUI snapshots reviewed and accepted. Checkpoint: committed +
+  pushed.

@@ -108,7 +108,17 @@ impl AnthropicProvider {
         self
     }
 
-    /// Build the JSON request body sent to `/messages`.
+    /// Declare the model's context window, consumed by the session budget.
+    #[must_use]
+    pub fn with_max_context_tokens(mut self, tokens: Option<u64>) -> Self {
+        self.declaration.max_context_tokens = tokens;
+        self
+    }
+
+    /// Build the JSON request body sent to `/messages`. A requested reasoning
+    /// effort clamps to a no-op on this wire: mapping it onto the extended-
+    /// thinking request shape changes the response stream contract, which is a
+    /// deliberate future change, not a side effect of an effort knob.
     #[must_use]
     pub fn build_body(&self, request: &ModelRequest) -> Value {
         let (system, messages) = translate_messages(&request.messages);
