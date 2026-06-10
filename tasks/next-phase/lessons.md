@@ -1,0 +1,15 @@
+# Lessons — NextPhase Plan
+
+> Append during the run, the moment a slice teaches something — not at the
+> gate. Disposable run-notes; durable lessons migrate to the permanent
+> `tasks/lessons.md` at the plan's §7 gate.
+
+- 2026-06-10 (subject 00): verify a review's line references *and its claims*
+  before scoping fixes — review §2.2 said POSIX `env rm -rf` classifies
+  Unknown, but `env` is actually in the classifier's read-only list, so it
+  auto-Allows. The fix scope (02.3) grew: remove `env` from read-only, don't
+  just add wrapper detection.
+- 2026-06-10 (subject 00): Anthropic publishes reset times as RFC 3339 in
+  `anthropic-ratelimit-*-reset` headers; the adapter currently never fills
+  `reset_at`. Fix alongside the OpenAI duration-string parse (01.5) so both
+  adapters surface machine-readable resets.
