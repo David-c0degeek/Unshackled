@@ -9,7 +9,7 @@
 | Box ID | Owner | Action | Source subject | Status | Deferral rationale |
 |---|---|---|---|---|---|
 | 02.8 | product-owner | Review and approve the reliability-contract ADR and the bypass-scope decision (02.5) | 02 | DONE | Approved 2026-06-10; ADR-0010 accepted. |
-| 03.2 | product-owner | Approve the memory/store convergence ADR (LocalPilot store vs LocalMind ownership; single redaction stack) | 03 | TODO | |
+| 03.2 | product-owner | Approve the memory/store convergence ADR (LocalPilot store vs LocalMind ownership; single redaction stack) | 03 | DONE | Approved 2026-06-10; ADR-0011 accepted. |
 | 04.2 | product-owner | Sign off models.dev license/attribution and the vendoring approach before the snapshot lands in-repo | 04 | DEFERRED | Box abandoned per D009 (local-first scope; no snapshot lands in this plan). Revisit with a follow-on hosted-catalog plan. |
 | M1 | product-owner | §8 acceptance sign-off after the §7 gate passes | plan | TODO | |
 | M2 | product-owner | `review-technical.2026-06-09.md` and `review.2026-06-09.md` are untracked at the repo root; commit them (suggested: move under `tasks/`) so the plan's authoritative inputs are durable across machines and resets | plan | DONE | Approved 2026-06-10; moved under `tasks/` and committed. |

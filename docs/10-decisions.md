@@ -4,7 +4,7 @@ This file starts the decision log. Add new records at the top.
 
 ## ADR-0011: Store Convergence — Execution Record vs Memory
 
-Status: proposed
+Status: accepted
 
 LocalPilot persists state in two stacks, which were growing toward overlap.
 This record fixes the ownership boundary:

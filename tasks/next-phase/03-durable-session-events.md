@@ -20,8 +20,8 @@ loop. Requires subjects 01–02 `DONE` (D001).
       the only memory backend; LocalPilot store as transcript/event-only), and
       a single redaction stack (today two stacks with different pattern sets).
       The event-log schema in 03.3 depends on this decision. (Review §6.2.)
-- [ ] **03.2** (product-owner) Approve the convergence ADR. Mirrored in
-      `manual-actions.md`.
+- [x] **03.2** (product-owner) Approve the convergence ADR. Mirrored in
+      `manual-actions.md`. Approved 2026-06-10; ADR-0011 promoted to accepted.
 - [x] **03.3** (agent) Session event log in the store: typed event enum
       covering at minimum session open/close (with open reason), user input
       admitted, provider turn start/end, text/reasoning/usage deltas or
@@ -66,8 +66,8 @@ loop. Requires subjects 01–02 `DONE` (D001).
 > checkpoint after the fixes.
 
 - [x] Captain Hindsight review recorded (interim — agent boxes 03.1, 03.3–03.7;
-      subject stays open until product-owner box 03.2 resolves)
-- [ ] Verdict is `CLOSE` (pending 03.2)
+      subject stayed open until product-owner box 03.2 resolved)
+- [x] Verdict is `CLOSE` (03.2 approved 2026-06-10; ADR-0011 accepted)
 
 **Captain Hindsight review (2026-06-10, interim after 03.1, 03.3–03.7):**
 
