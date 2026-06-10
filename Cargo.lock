@@ -1325,6 +1325,7 @@ dependencies = [
 name = "localpilot-recovery"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
 ]
 

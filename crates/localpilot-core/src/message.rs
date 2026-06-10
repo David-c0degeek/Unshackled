@@ -49,11 +49,33 @@ pub struct MessageMetadata {
     pub id: Option<MessageId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Why this message was synthesized by the runtime rather than authored by
+    /// the user or the model (for example a repair prompt or tool-call
+    /// rejection feedback). A synthetic message still shapes the conversation
+    /// the model sees and is persisted like any other, so a resumed session
+    /// reconstructs exactly the history the model received.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthetic: Option<String>,
 }
 
 impl MessageMetadata {
     fn is_empty(&self) -> bool {
-        self.id.is_none() && self.provider.is_none()
+        self.id.is_none() && self.provider.is_none() && self.synthetic.is_none()
+    }
+}
+
+impl Message {
+    /// Mark this message as runtime-synthesized, recording why.
+    #[must_use]
+    pub fn into_synthetic(mut self, why: impl Into<String>) -> Self {
+        self.metadata.synthetic = Some(why.into());
+        self
+    }
+
+    /// Whether this message was synthesized by the runtime.
+    #[must_use]
+    pub fn is_synthetic(&self) -> bool {
+        self.metadata.synthetic.is_some()
     }
 }
 

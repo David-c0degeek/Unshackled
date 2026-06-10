@@ -1,4 +1,4 @@
-﻿# LocalMind Integration Contract
+# LocalMind Integration Contract
 
 ## Why
 
@@ -13,6 +13,12 @@ into the LocalPilot binary through `localpilot-localmind`; users do not install
 LocalMind separately.
 
 ## Ownership Boundary
+
+The store split is fixed by ADR-0011: the LocalPilot store (`.localpilot/`) is
+the execution record only (transcripts, the session event log, caches,
+diagnostics); LocalMind (`.localmind/`) is the only memory/learning backend.
+LocalPilot's redaction stack is the canonical redactor at the host boundary;
+LocalMind's import redaction is defense in depth, not a second authority.
 
 - **LocalMind core is host-neutral and must not depend on LocalPilot.** It owns
   session closeout, redaction-on-import, summarization, candidate-lesson

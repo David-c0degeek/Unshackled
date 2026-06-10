@@ -593,3 +593,75 @@ async fn mid_stream_quota_error_persists_a_paused_resume_state() {
     assert!(outcome.paused, "{:?}", outcome.blocked_reason);
     assert!(rt.store().get_cache(QUOTA_PAUSE_KEY).unwrap().is_some());
 }
+
+#[tokio::test]
+async fn a_replanned_run_is_replayable_from_the_event_log() {
+    let dir = sample_repo();
+    let root = dir.path();
+    // Every attempt completes a turn, but the gate always fails; with an
+    // attempt budget of one the step is replanned immediately.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .text("attempted")
+            .text("attempted again"),
+    );
+    let mut rt = runtime(root, Arc::clone(&provider));
+    let rules = RuleEngine::with_baseline(&Default::default());
+
+    let outcome = resume_one_step(
+        &mut rt,
+        root,
+        &rules,
+        None,
+        &[failing_check("lint", None)],
+        2,
+    )
+    .await
+    .unwrap();
+    assert!(!outcome.committed);
+    let reason = outcome.blocked_reason.unwrap();
+    assert!(reason.contains("replanned"), "actual reason: {reason}");
+
+    // Replay the run from the durable log alone.
+    let events = rt.store().read_events(rt.session_id()).unwrap();
+    let position = |predicate: &dyn Fn(&localpilot_store::SessionEventKind) -> bool| {
+        events.iter().position(|event| predicate(&event.kind))
+    };
+    let step_started = position(&|kind| {
+        matches!(
+            kind,
+            localpilot_store::SessionEventKind::StepStarted { number: 1, .. }
+        )
+    })
+    .expect("the step opening is recorded");
+    let turn_started =
+        position(&|kind| matches!(kind, localpilot_store::SessionEventKind::TurnStarted { .. }))
+            .expect("the attempt's turn is recorded");
+    let branch_closed = events
+        .iter()
+        .enumerate()
+        .find_map(|(index, event)| match &event.kind {
+            localpilot_store::SessionEventKind::BranchClosed { summary } => {
+                Some((index, summary.clone()))
+            }
+            _ => None,
+        })
+        .expect("the abandoned attempt closes its branch");
+    assert!(step_started < turn_started && turn_started < branch_closed.0);
+    assert!(branch_closed.1.title.contains("abandoned"));
+    assert!(
+        !branch_closed.1.entries.is_empty(),
+        "the branch summary digests what was tried"
+    );
+
+    // The conversation the model saw is derivable from the same log...
+    let rebuilt = localpilot_store::transcript_from_events(&events);
+    assert_eq!(
+        rebuilt,
+        rt.store().read_transcript(rt.session_id()).unwrap()
+    );
+    // ...and the tree is well-formed: each event chains to its predecessor.
+    for pair in events.windows(2) {
+        assert_eq!(pair[1].parent_id, Some(pair[0].id));
+    }
+}

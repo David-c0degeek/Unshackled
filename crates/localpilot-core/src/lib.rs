@@ -1,4 +1,4 @@
-﻿//! Core domain types for LocalPilot.
+//! Core domain types for LocalPilot.
 //!
 //! This crate is the provider-neutral, UI-neutral heart of the workspace: the
 //! message and content model, normalized tool call/result types, usage
@@ -11,12 +11,14 @@ mod error;
 mod id;
 mod message;
 mod secret;
+mod summary;
 mod tool;
 mod usage;
 
 pub use error::CoreError;
-pub use id::{MessageId, SessionId, ToolUseId, TurnId};
+pub use id::{EventId, MessageId, SessionId, ToolUseId, TurnId};
 pub use message::{ContentBlock, Message, MessageMetadata, Role};
 pub use secret::Secret;
+pub use summary::StructuredSummary;
 pub use tool::{ToolCall, ToolResult};
 pub use usage::{TokenUsage, UsageSummary};

@@ -10,20 +10,20 @@ use std::time::Duration;
 use futures::StreamExt;
 use localpilot_config::redact::redact;
 use localpilot_config::CheckConfig;
-use localpilot_core::{ContentBlock, Message, Role, SessionId, TokenUsage, ToolCall, ToolUseId};
+use localpilot_core::{
+    ContentBlock, EventId, Message, Role, SessionId, TokenUsage, ToolCall, ToolUseId,
+};
 use localpilot_llm::{
     ModelEvent, ModelEventStream, ModelProvider, ModelRequest, ProviderError, QuotaInfo, ToolSpec,
 };
-use localpilot_recovery::{
-    detect, is_repeated_token_loop, is_slash_flood, ModelHealth, RecoveryEngine,
-};
+use localpilot_recovery::{detect, ModelHealth, RecoveryEngine, StreamMonitor};
 use localpilot_sandbox::{Approver, Interactivity, PermissionEngine, Profile};
-use localpilot_store::Store;
+use localpilot_store::{origin_for, OpenReason, SessionEventKind, Store};
 use localpilot_tools::{ToolContext, ToolRegistry};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use crate::compaction::{compact_with_summary, estimate_tokens};
+use crate::compaction::{compact_with_summary, estimate_tokens, CompactionResult};
 use crate::quality::{CheckOutcome, CheckRunner};
 use crate::rules::{trigger_for_cadence, Trigger};
 
@@ -142,6 +142,13 @@ pub struct SessionRuntime {
     /// Quota metadata from the most recent provider rate-limit/quota error in a
     /// turn, used to schedule a precise pause. Reset at the start of each turn.
     last_quota: Option<QuotaInfo>,
+    /// Tail of the durable event log, for parent chaining.
+    last_event: Option<EventId>,
+    /// Bumped on every mutation of `messages`; keys the compaction cache.
+    history_generation: u64,
+    /// The compaction result for the current `history_generation`, so the
+    /// per-iteration request shaping does not recompact unchanged history.
+    compaction_cache: Option<(u64, CompactionResult)>,
 }
 
 impl SessionRuntime {
@@ -166,7 +173,7 @@ impl SessionRuntime {
         ));
         messages.extend(seed);
 
-        Self {
+        let mut runtime = Self {
             provider,
             tools,
             engine,
@@ -178,7 +185,38 @@ impl SessionRuntime {
             session_id: SessionId::new(),
             messages,
             last_quota: None,
+            last_event: None,
+            history_generation: 0,
+            compaction_cache: None,
+        };
+        runtime.record_event(SessionEventKind::SessionOpened {
+            reason: OpenReason::New,
+        });
+        runtime
+    }
+
+    /// Append one entry to the durable session event log, chaining it to the
+    /// previous entry. A write failure is logged but never crashes the loop —
+    /// the event log is an audit record, not a gate.
+    pub fn record_event(&mut self, kind: SessionEventKind) {
+        match self
+            .store
+            .append_event(self.session_id, self.last_event, kind)
+        {
+            Ok(id) => self.last_event = Some(id),
+            Err(err) => tracing::warn!(error = %err, "failed to persist session event"),
         }
+    }
+
+    /// The id of the most recent durable event, for fork bookkeeping.
+    #[must_use]
+    pub fn last_event_id(&self) -> Option<EventId> {
+        self.last_event
+    }
+
+    /// Record that this session is closing.
+    pub fn close(&mut self) {
+        self.record_event(SessionEventKind::SessionClosed);
     }
 
     /// The session id (transcripts are stored under it).
@@ -224,15 +262,17 @@ impl SessionRuntime {
             .collect();
         self.messages = leading_system;
         self.last_quota = None;
+        self.history_generation += 1;
     }
 
     /// Compact the stored runtime message history using the same rules applied
     /// before automatic provider requests.
     #[must_use]
     pub fn compact_conversation(&mut self) -> ManualCompaction {
-        let result = compact_with_summary(self.messages.clone(), self.config.context_token_limit);
+        let result = self.compacted_history();
         let context_used = estimate_tokens(&result.messages);
         self.messages = result.messages;
+        self.history_generation += 1;
         ManualCompaction {
             compacted: result.compacted,
             context_used,
@@ -314,7 +354,10 @@ impl SessionRuntime {
                         }
                     } else {
                         if let Some(reset) = self.last_quota.as_ref().map(quota_reset_label) {
-                            let _ = events.send(RuntimeEvent::QuotaPaused { reset });
+                            let _ = events.send(RuntimeEvent::QuotaPaused {
+                                reset: reset.clone(),
+                            });
+                            self.record_event(SessionEventKind::QuotaPaused { reset });
                         }
                         let _ = events.send(RuntimeEvent::Warning(err.to_string()));
                         return Err(StreamOpen::Failed);
@@ -342,7 +385,30 @@ impl SessionRuntime {
         if let Err(err) = self.store.append_message(self.session_id, &message) {
             tracing::warn!(error = %err, "failed to persist transcript message");
         }
+        self.record_event(SessionEventKind::Message {
+            origin: origin_for(&message),
+            message: message.clone(),
+        });
         self.messages.push(message);
+        self.history_generation += 1;
+    }
+
+    /// Compact the live history for the next request, reusing the cached
+    /// result while the history is unchanged.
+    fn compacted_history(&mut self) -> CompactionResult {
+        if let Some((generation, cached)) = &self.compaction_cache {
+            if *generation == self.history_generation {
+                return cached.clone();
+            }
+        }
+        let result = compact_with_summary(self.messages.clone(), self.config.context_token_limit);
+        if result.compacted {
+            if let Some(summary) = result.summary.clone() {
+                self.record_event(SessionEventKind::Compacted { summary });
+            }
+        }
+        self.compaction_cache = Some((self.history_generation, result.clone()));
+        result
     }
 
     /// Run one user turn to completion. Streaming and tool execution are
@@ -364,8 +430,7 @@ impl SessionRuntime {
                 return self.stop(events, StopReason::Cancelled);
             }
 
-            let compacted =
-                compact_with_summary(self.messages.clone(), self.config.context_token_limit);
+            let compacted = self.compacted_history();
             let used = estimate_tokens(&compacted.messages);
             let _ = events.send(RuntimeEvent::ContextUsage {
                 used,
@@ -382,6 +447,9 @@ impl SessionRuntime {
             let request =
                 ModelRequest::new(self.config.model.clone(), request_messages).with_tools(tools);
 
+            self.record_event(SessionEventKind::TurnStarted {
+                model: self.config.model.clone(),
+            });
             let mut stream = match self.open_stream(&request, events, cancel).await {
                 Ok(stream) => stream,
                 Err(StreamOpen::Cancelled) => return self.stop(events, StopReason::Cancelled),
@@ -392,11 +460,9 @@ impl SessionRuntime {
             let mut reasoning = String::new();
             let mut calls: Vec<(String, String, serde_json::Value)> = Vec::new();
             let mut stream_failed = false;
-            // Byte length at the last live degenerate-output check; re-checked
-            // every `FLOOD_CHECK_STRIDE` bytes so a runaway stream is aborted
-            // early instead of flooding the whole turn.
-            let mut last_flood_check = 0usize;
-            const FLOOD_CHECK_STRIDE: usize = 32;
+            // Live degenerate-output guard, fed incrementally so a runaway
+            // stream is aborted early without rescanning the whole turn.
+            let mut monitor = StreamMonitor::default();
 
             loop {
                 tokio::select! {
@@ -410,15 +476,13 @@ impl SessionRuntime {
                             // Live guard: stop a degenerate punctuation flood or a
                             // repeated-token loop early; the post-stream recovery
                             // ladder then handles the bad turn.
-                            if text.len().saturating_sub(last_flood_check) >= FLOOD_CHECK_STRIDE {
-                                last_flood_check = text.len();
-                                if is_slash_flood(&text) || is_repeated_token_loop(&text) {
-                                    let _ = events.send(RuntimeEvent::Warning(
-                                        "degenerate output detected; stopping generation"
-                                            .to_string(),
-                                    ));
-                                    break;
-                                }
+                            monitor.push(&delta);
+                            if monitor.detected() {
+                                let _ = events.send(RuntimeEvent::Warning(
+                                    "degenerate output detected; stopping generation"
+                                        .to_string(),
+                                ));
+                                break;
                             }
                         }
                         Some(Ok(ModelEvent::ReasoningDelta(delta))) => {
@@ -430,6 +494,10 @@ impl SessionRuntime {
                         }
                         Some(Ok(ModelEvent::Usage(usage))) => {
                             let _ = events.send(RuntimeEvent::Usage(usage));
+                            self.record_event(SessionEventKind::UsageReported {
+                                input_tokens: usage.input_tokens,
+                                output_tokens: usage.output_tokens,
+                            });
                         }
                         Some(Ok(ModelEvent::ProviderWarning { message })) => {
                             let _ = events.send(RuntimeEvent::Warning(message));
@@ -439,7 +507,10 @@ impl SessionRuntime {
                         Some(Err(err)) => {
                             self.last_quota = err.quota().cloned();
                             if let Some(reset) = self.last_quota.as_ref().map(quota_reset_label) {
-                                let _ = events.send(RuntimeEvent::QuotaPaused { reset });
+                                let _ = events.send(RuntimeEvent::QuotaPaused {
+                                    reset: reset.clone(),
+                                });
+                                self.record_event(SessionEventKind::QuotaPaused { reset });
                             }
                             let _ = events
                                 .send(RuntimeEvent::Warning(format!("stream error: {err}")));
@@ -472,6 +543,10 @@ impl SessionRuntime {
                 let _ = events.send(RuntimeEvent::Recovery {
                     health: self.recovery.health(),
                 });
+                self.record_event(SessionEventKind::RecoveryDiagnostic {
+                    kind: format!("{kind:?}"),
+                    health: format!("{:?}", self.recovery.health()),
+                });
                 if self.recovery.health() == ModelHealth::Degraded {
                     return self.stop(events, StopReason::Degraded);
                 }
@@ -486,7 +561,12 @@ impl SessionRuntime {
                         "retrying the degenerate response without tool schemas".to_string(),
                     ));
                 }
-                self.messages.push(Message::text(Role::User, REPAIR_PROMPT));
+                // Persisted and marked synthetic: the repair prompt shapes the
+                // conversation the model sees, so a resumed session must
+                // reconstruct it.
+                self.append(
+                    Message::text(Role::User, REPAIR_PROMPT).into_synthetic("repair prompt"),
+                );
                 continue;
             }
             self.recovery.record_clean_turn();
@@ -544,7 +624,9 @@ impl SessionRuntime {
                 if calls.is_empty() {
                     // Nothing answerable was persisted; correct via a plain
                     // user message instead.
-                    self.append(Message::text(Role::User, reason));
+                    self.append(
+                        Message::text(Role::User, reason).into_synthetic("tool call rejected"),
+                    );
                 }
                 continue;
             }
@@ -581,6 +663,10 @@ impl SessionRuntime {
                     id: id.clone(),
                     name: name.clone(),
                 });
+                self.record_event(SessionEventKind::ToolStarted {
+                    id: id.clone(),
+                    name: name.clone(),
+                });
                 let call = ToolCall::new(ToolUseId::from(id.as_str()), name.clone(), input.clone());
                 let ctx = ToolContext {
                     workspace: &self.workspace,
@@ -597,6 +683,11 @@ impl SessionRuntime {
                     is_error: result.is_error,
                     output: result.output.clone(),
                 });
+                self.record_event(SessionEventKind::ToolFinished {
+                    id: result.id.to_string(),
+                    name: name.clone(),
+                    is_error: result.is_error,
+                });
                 self.append(Message::new(
                     Role::Tool,
                     vec![ContentBlock::ToolResult(result)],
@@ -607,7 +698,13 @@ impl SessionRuntime {
         self.stop(events, StopReason::MaxTurns)
     }
 
-    fn stop(&self, events: &broadcast::Sender<RuntimeEvent>, reason: StopReason) -> StopReason {
+    fn stop(&mut self, events: &broadcast::Sender<RuntimeEvent>, reason: StopReason) -> StopReason {
+        if reason == StopReason::Cancelled {
+            self.record_event(SessionEventKind::Cancelled);
+        }
+        self.record_event(SessionEventKind::TurnEnded {
+            stop: format!("{reason:?}"),
+        });
         let _ = events.send(RuntimeEvent::Stopped(reason));
         reason
     }
