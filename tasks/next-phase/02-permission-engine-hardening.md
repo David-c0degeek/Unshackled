@@ -52,8 +52,9 @@ aspiration into enforced behavior. Fixes review-technical §1.4–§1.5 and
       non-UTF-8 files: existence check via the path, not via lossy read;
       `read_to_string` used only for newline detection. Regression test with a
       binary target. (Review §3.5.)
-- [ ] **02.8** (product-owner) Review and approve the reliability-contract ADR
+- [x] **02.8** (product-owner) Review and approve the reliability-contract ADR
       and the 02.5 bypass-scope decision. Mirrored in `manual-actions.md`.
+      Approved by product-owner 2026-06-10; ADR-0010 promoted to accepted.
 
 ## Hindsight checkpoint
 > Run after all boxes in this subject are complete and before marking the
@@ -68,8 +69,8 @@ aspiration into enforced behavior. Fixes review-technical §1.4–§1.5 and
 > checkpoint after the fixes.
 
 - [x] Captain Hindsight review recorded (interim — agent boxes 02.1–02.7;
-      subject stays open until product-owner box 02.8 resolves)
-- [ ] Verdict is `CLOSE` (pending 02.8)
+      subject stayed open until product-owner box 02.8 resolved)
+- [x] Verdict is `CLOSE` (02.8 approved 2026-06-10; ADR-0010 accepted)
 
 **Captain Hindsight review (2026-06-10, interim after 02.1–02.7):**
 

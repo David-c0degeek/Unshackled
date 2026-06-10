@@ -157,7 +157,7 @@ must not re-enter via any box (D002).
 
 | Source | Contribution |
 |---|---|
-| `review-technical.2026-06-09.md` | Defect inventory for subjects 01–02 (§1 critical/high, §2 permission inconsistencies, §3 lesser defects, §5 missing functionality); the reliability-contract idea (§6.1); the two-memory-systems problem (§6.2). **Currently untracked at repo root — see manual action M2.** |
+| `tasks/review-technical.2026-06-09.md` | Defect inventory for subjects 01–02 (§1 critical/high, §2 permission inconsistencies, §3 lesser defects, §5 missing functionality); the reliability-contract idea (§6.1); the two-memory-systems problem (§6.2). Moved under `tasks/` and committed per M2 (2026-06-10). |
 | `tasks/localpilot-next-phase-research.md` | Identity contract (§0) and decision filter; workstreams W0–W6 (§9); Pi/OpenCode mechanics to adapt (§5: event bus, RPC framing, session tree, compaction, catalog, thinking levels, steering, skills standard, supply chain, lifecycle); clean-room cautions (§10). |
 | `tasks/opencode-vs-localpilot.md` | Background survey; event-log event inventory (Priority 2), catalog field list (Priority 4), tool-upgrade ordering (Priority 6), phase acceptance-criteria patterns. Superseded by the research doc where they conflict (D003). |
 | `docs/06-harness-spec.md` | Owns the session loop / harness behavior subjects 01, 03, 06 change; receives the loop half of the reliability-contract spec text. |
@@ -238,7 +238,7 @@ must not re-enter via any box (D002).
 |---|---|---|---|---|---|
 | [x] | 00 | `tasks/next-phase/00-tooling-research-and-readiness.md` | DONE | agent: 8 | n/a |
 | [x] | 01 | `tasks/next-phase/01-wire-contract-and-streaming.md` | DONE | agent: 8 | n/a |
-| [ ] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | WAITING-APPROVAL (agent boxes done; 02.8 product-owner open) | agent: 7; product-owner: 1 | yes |
+| [x] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | DONE | agent: 7; product-owner: 1 | yes |
 | [ ] | 03 | `tasks/next-phase/03-durable-session-events.md` | TODO | agent: 6; product-owner: 1 | yes |
 | [ ] | 04 | `tasks/next-phase/04-model-catalog-and-budgets.md` | TODO | agent: 6; product-owner: 1 | yes |
 | [ ] | 05 | `tasks/next-phase/05-headless-drive-rpc-acp.md` | TODO | agent: 5 | n/a |

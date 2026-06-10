@@ -4,7 +4,7 @@ This file starts the decision log. Add new records at the top.
 
 ## ADR-0010: Reliability Contract for Unattended Operation
 
-Status: proposed
+Status: accepted
 
 LocalPilot's differentiator is unattended multi-step execution. That claim is
 made testable by an explicit **reliability contract**: a small set of named
