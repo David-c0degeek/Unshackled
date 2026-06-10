@@ -324,55 +324,59 @@ Plan-specific principles:
 > Run only when §5 is fully ticked. §7 is the engineering gate the agent
 > ticks; §8 is human acceptance that follows it.
 
-- [ ] All §5 subjects done (or explicitly `ABANDONED` with a §4 row)
-- [ ] Subject 00 completed, or explicitly waived/abandoned with a §4 row
-- [ ] Build command from the §2 Verification-commands table passes with 0
-      errors and 0 new warnings
-- [ ] Test command from the §2 Verification-commands table passes
-- [ ] Remaining §2 Verification-commands rows (lint/format, dep/release
-      hygiene, plan-specific gates) pass or are recorded `n/a`
-- [ ] §1 Risks-and-rollback table reviewed; rollback steps still accurate for
-      what actually shipped
-- [ ] Cross-cutting principles from §6 reviewed; plan-specific rules hold
-- [ ] Every non-abandoned subject has a recorded Captain Hindsight checkpoint
+- [x] All §5 subjects done (or explicitly `ABANDONED` with a §4 row) —
+      00–07 DONE; 04.1/04.2 ABANDONED per D009
+- [x] Subject 00 completed, or explicitly waived/abandoned with a §4 row
+- [x] Build command from the §2 Verification-commands table passes with 0
+      errors and 0 new warnings (`cargo check --workspace`, 2026-06-10)
+- [x] Test command from the §2 Verification-commands table passes
+      (`cargo test --workspace`, 2026-06-10; tui/learning feature build also
+      lint-clean)
+- [x] Remaining §2 Verification-commands rows pass: fmt + clippy clean;
+      `cargo machete` clean; `cargo deny check` ok; `cargo audit` ok (3
+      documented allowed warnings); both plan-specific gate rows pass
+- [x] §1 Risks-and-rollback table reviewed — still accurate. Notes: the
+      catalog-vendoring risk row is moot (D009 abandoned vendoring); the
+      permission-tightening row's docs/07 release note stands; all other
+      rollbacks remain per-commit reverts as written
+- [x] Cross-cutting principles from §6 reviewed; plan-specific rules hold
+      (identity filter, deferred list untouched, wire formats versioned)
+- [x] Every non-abandoned subject has a recorded Captain Hindsight checkpoint
       with verdict `CLOSE`
-- [ ] Every ticked box has a Progress-log entry and is covered by a pushed
+- [x] Every ticked box has a Progress-log entry and is covered by a pushed
       checkpoint commit
-- [ ] Durable architecture decisions promoted to ADRs in
-      `docs/10-decisions.md` (repo rule; see §4)
-- [ ] Current plan/integration branch is pushed; `git status --short` has no
-      uncommitted plan/code changes except explicitly deferred artifacts
-- [ ] If Collaboration mode is `parallel`, the Parallel work tracker has no
-      stale active owners, unmerged subject branches, or unresolved handoff
-      notes
-- [ ] Shipped code/tests/comments/identifiers are plan-agnostic — grep the
-      repo **excluding `tasks/`** for box IDs (`\b\d\d\.\d+\b`), decision IDs
-      (`\bD\d{3}\b`), the literal `tasks/next-phase/`, the plan filename
-      `NextPhase-Plan.md`, and `\bslices?\b`; zero hits after triaging false
-      positives (version strings can match the box-ID pattern)
-- [ ] Commit messages are plan-agnostic — `git log <base>..HEAD` mentions no
-      box IDs, decision IDs, `tasks/next-phase/`, `NextPhase-Plan.md`, or
-      `slice`/`slices` (same false-positive triage; file grep does not cover
-      commit messages)
-- [ ] Branch names and public PR titles/descriptions are plan-agnostic if used
-- [ ] `tasks/next-phase/manual-actions.md` — every human-owned box resolved or
-      explicitly deferred
-- [ ] **Plan-specific:** tool-pairing invariant property test exists and
-      passes (after any turn, every `tool_use` id in history has a matching
-      `tool_result` id)
-- [ ] **Plan-specific:** permission regression tests pass — allowlist can
-      never auto-allow Destructive/Privileged/Unknown; shell-wrapper commands
-      never classify below Unknown on any platform; destructive git flags
-      classify Destructive
-- [ ] **Plan-specific:** reliability-contract text landed in the owning docs/
-      spec(s) and its ADR is merged
-- [ ] **Plan-specific:** session event-log roundtrip + format-migration tests
-      pass; a transcript rebuilt from events equals the transcript the model
-      saw (including synthetic messages)
-- [ ] `tasks/next-phase/lessons.md` reconciled; lasting lessons migrated to
-      the permanent `tasks/lessons.md` (create it if missing) before the
-      `tasks/next-phase/` folder is deleted (see Disposable note)
-- [ ] Plan handed to reviewer for §8 sign-off
+- [x] Durable architecture decisions promoted to ADRs:
+      ADR-0010 (reliability contract, accepted), ADR-0011 (store
+      convergence, accepted)
+- [x] Current plan/integration branch (`next-phase-plan`) is pushed;
+      `git status --short` clean
+- [x] Parallel tracker n/a (mode is `solo`)
+- [x] Shipped code/tests/comments/identifiers are plan-agnostic — grep run
+      2026-06-10; all hits triaged as false positives: version strings/RFC
+      sections (box-id pattern), the product's own `DECISIONS.md` D001
+      format (`decisions.rs`), and the planning *skill's own template/docs*
+      (`plan-template.md`, docs/14), which document the plan format rather
+      than reference this plan
+- [x] Commit messages are plan-agnostic — one triaged false positive: the
+      plan-template skill update commit describes the template's own
+      "per-subject slice numbering" feature
+- [x] Branch name `next-phase-plan` describes the work phase generically; no
+      PRs opened yet
+- [x] `tasks/next-phase/manual-actions.md` — 02.8/03.2/M2/M3 DONE; 04.2
+      DEFERRED per D009; M1 (§8 acceptance) is the remaining human action
+- [x] **Plan-specific:** tool-pairing invariant property test passes
+      (`cargo test -p localpilot-harness --test pairing`)
+- [x] **Plan-specific:** permission regression tests pass
+      (`cargo test -p localpilot-sandbox`,
+      `cargo test -p localpilot-tools --test tools`)
+- [x] **Plan-specific:** reliability-contract text landed (docs/06 + docs/07)
+      and ADR-0010 is accepted
+- [x] **Plan-specific:** event-log roundtrip + migration tests pass; the
+      derivation test proves rebuilt-transcript == stored transcript
+      including synthetic messages
+- [x] `tasks/next-phase/lessons.md` reconciled; durable lessons migrated to
+      `tasks/lessons.md`
+- [x] Plan handed to reviewer for §8 sign-off (manual action M1)
 
 ---
 

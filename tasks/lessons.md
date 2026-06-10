@@ -1,4 +1,4 @@
-﻿# Lessons — durable engineering notes
+# Lessons — durable engineering notes
 
 Permanent home for lessons worth keeping past any one work cycle. Plan-agnostic:
 no disposable IDs, just the gotcha and how to handle it. Append as you learn.
@@ -103,3 +103,47 @@ or published.
 Dynamic tools should own their metadata in registry/tool entries and expose it
 through borrowed accessors. Leaking heap strings to satisfy a static trait
 lifetime makes registry rebuild behavior harder to reason about.
+
+## Verify a review's claims, not just its line numbers
+
+Before scoping fixes from a code review, re-check what the code actually does
+at each cited site. One review claim here *understated* a defect (a wrapper
+command classified read-only, not unknown), which changed the fix's scope.
+Treat review findings as hypotheses to confirm against the tree.
+
+## serde: never flatten a tagged enum into an envelope with id-like fields
+
+`#[serde(flatten)]` merges the variant's fields into the envelope's JSON
+object; a variant field named `id` silently collides with the envelope's `id`
+and corrupts it. Nest the payload under a named field instead. A roundtrip
+test over every variant catches this immediately — always write one for a new
+serialized enum.
+
+## Derive event metadata from the payload, not the call site
+
+When emitting events about a value (e.g. a message's origin), compute the
+metadata from the value itself rather than passing it at each emission site.
+Call sites then cannot disagree with the payload, and an equivalence test
+proves a structural property instead of pinning call-site discipline.
+
+## Before tightening a security primitive, find who depends on the looseness
+
+A permission rule's "weakness" may be a feature's grant mechanism (here: the
+ratified quality gate runs headless precisely because the allowlist lifts a
+non-interactive low-risk deny). Grep for callers that rely on the current
+behavior before narrowing it, and keep the behavior tests that encode those
+dependencies — one caught the break instantly.
+
+## Shell heredocs corrupt on quote/backtick-rich content — patch via files
+
+Long `python - <<EOF` heredocs with mixed quotes and backticks break the
+outer shell unpredictably on this setup. For multi-file mechanical edits,
+write the patch script to a file with the editor tooling and execute it; same
+effect, no quoting hazards.
+
+## Incremental scanners need an equivalence proof against the batch form
+
+When replacing a whole-buffer rescan with an incremental state machine (the
+streaming degenerate-output monitor), property-test it against the original
+full-scan implementation over random inputs *and random chunkings*. The
+chunking dimension is where incremental bugs live.
