@@ -387,7 +387,7 @@ Plan-specific principles:
 
 | Date | Reviewer | Result | Notes |
 |---|---|---|---|
-| | | | |
+| 2026-06-10 | David (product-owner) | Accepted | Approved after the §7 gate passed. Scope executed with recorded deviations D005–D010, including the D009 local-first slimming of the model-metadata subject. |
 
 ---
 
