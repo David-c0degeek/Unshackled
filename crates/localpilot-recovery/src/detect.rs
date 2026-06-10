@@ -91,6 +91,138 @@ fn longest_repeat_run(line: &str) -> usize {
     best
 }
 
+/// Incremental degenerate-output monitor for live streams.
+///
+/// Produces the same verdict as [`is_slash_flood`] `||`
+/// [`is_repeated_token_loop`] over the accumulated text, but in O(delta) work
+/// per pushed chunk instead of rescanning the whole turn — the live guard runs
+/// on every delta of a potentially unbounded stream.
+#[derive(Debug, Default)]
+pub struct StreamMonitor {
+    in_fence: bool,
+    line_lead: LineLead,
+    prev_char: Option<char>,
+    run: usize,
+    line_max_run: usize,
+    max_outside: usize,
+    max_inside: usize,
+    prev_token: String,
+    token: String,
+    repeat: usize,
+    max_repeat: usize,
+}
+
+/// Whether the current line's leading non-whitespace begins a ``` fence marker.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum LineLead {
+    /// Still reading leading whitespace / backticks.
+    #[default]
+    Pending,
+    /// The line starts with ``` (a fence-toggle line; its runs do not count).
+    Fence,
+    /// The line starts with ordinary content.
+    Content,
+}
+
+impl StreamMonitor {
+    /// Feed one stream delta.
+    pub fn push(&mut self, delta: &str) {
+        let mut backticks_pending = 0u8;
+        for c in delta.chars() {
+            if c == '\n' {
+                self.close_line();
+                backticks_pending = 0;
+                continue;
+            }
+            // Decide whether this line is a fence-toggle line from its leading
+            // non-whitespace characters (mirrors `trim_start().starts_with("```")`).
+            if self.line_lead == LineLead::Pending {
+                if c == '`' {
+                    backticks_pending += 1;
+                    if backticks_pending == 3 {
+                        self.line_lead = LineLead::Fence;
+                    }
+                } else if c.is_whitespace() && backticks_pending == 0 {
+                    // still in leading whitespace
+                } else {
+                    self.line_lead = LineLead::Content;
+                }
+            }
+            // Punctuation-run tracking (a fence-toggle line's runs are excluded).
+            if self.line_lead != LineLead::Fence {
+                if is_punct_run_char(c) && self.prev_char == Some(c) {
+                    self.run += 1;
+                } else if is_punct_run_char(c) {
+                    self.run = 1;
+                } else {
+                    self.run = 0;
+                }
+                self.line_max_run = self.line_max_run.max(self.run);
+            }
+            self.prev_char = Some(c);
+            // Token-loop tracking.
+            if c.is_whitespace() {
+                self.close_token();
+            } else {
+                self.token.push(c);
+            }
+        }
+    }
+
+    fn close_line(&mut self) {
+        if self.line_lead == LineLead::Fence {
+            self.in_fence = !self.in_fence;
+        } else if self.in_fence {
+            self.max_inside = self.max_inside.max(self.line_max_run);
+        } else {
+            self.max_outside = self.max_outside.max(self.line_max_run);
+        }
+        self.line_lead = LineLead::Pending;
+        self.prev_char = None;
+        self.run = 0;
+        self.line_max_run = 0;
+        self.close_token();
+    }
+
+    fn close_token(&mut self) {
+        if self.token.is_empty() {
+            return;
+        }
+        if self.token == self.prev_token {
+            self.repeat += 1;
+        } else {
+            self.repeat = 1;
+        }
+        self.max_repeat = self.max_repeat.max(self.repeat);
+        std::mem::swap(&mut self.prev_token, &mut self.token);
+        self.token.clear();
+    }
+
+    /// Whether the accumulated stream is degenerate (punctuation flood or
+    /// repeated-token loop), including the still-open line and token.
+    #[must_use]
+    pub fn detected(&self) -> bool {
+        let (mut outside, mut inside) = (self.max_outside, self.max_inside);
+        if self.line_lead != LineLead::Fence {
+            if self.in_fence {
+                inside = inside.max(self.line_max_run);
+            } else {
+                outside = outside.max(self.line_max_run);
+            }
+        }
+        let repeat = if self.token.is_empty() {
+            self.max_repeat
+        } else if self.token == self.prev_token {
+            self.max_repeat.max(self.repeat + 1)
+        } else {
+            self.max_repeat.max(1)
+        };
+        outside >= SLASH_FLOOD_THRESHOLD
+            || inside >= SLASH_FLOOD_IN_CODE_THRESHOLD
+            || repeat >= REPEATED_TOKEN_THRESHOLD
+    }
+}
+
 /// Whether the same whitespace-delimited token repeats consecutively past the
 /// loop threshold.
 #[must_use]
@@ -147,5 +279,43 @@ mod tests {
         assert!(!is_repeated_token_loop(&short));
         let long = "na ".repeat(20);
         assert!(is_repeated_token_loop(&long));
+    }
+
+    #[test]
+    fn stream_monitor_matches_the_full_scan_on_representative_streams() {
+        let cases = [
+            "here we go ////////////////",
+            "Here is a path comment:\n```\n//////// not a flood, just code\n```\nok",
+            &"/".repeat(60),
+            &format!("```\n{}\n```", "/".repeat(60)),
+            &"na ".repeat(20),
+            &"na ".repeat(5),
+            "normal prose with no degeneration at all",
+            "  ```rust\n====== separator ======\n```",
+            "===== eight ========\ntext",
+        ];
+        for text in cases {
+            let mut monitor = StreamMonitor::default();
+            monitor.push(text);
+            let expected = is_slash_flood(text) || is_repeated_token_loop(text);
+            assert_eq!(monitor.detected(), expected, "text: {text:?}");
+        }
+    }
+
+    proptest::proptest! {
+        // The incremental monitor agrees with the full rescan regardless of how
+        // the stream is chunked.
+        #[test]
+        fn stream_monitor_is_equivalent_to_full_rescan(
+            pieces in proptest::collection::vec("[a-z/=#.\\-`\\n ]{0,12}", 0..24)
+        ) {
+            let text: String = pieces.concat();
+            let mut monitor = StreamMonitor::default();
+            for piece in &pieces {
+                monitor.push(piece);
+            }
+            let expected = is_slash_flood(&text) || is_repeated_token_loop(&text);
+            proptest::prop_assert_eq!(monitor.detected(), expected);
+        }
     }
 }

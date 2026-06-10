@@ -669,9 +669,16 @@ async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() 
     let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
     assert_eq!(reason, StopReason::Done);
 
+    // The truncated text is never persisted as a finished reply; the repair
+    // prompt that shaped the retry *is* persisted, marked synthetic, so the
+    // stored transcript equals the history the model saw.
     let transcript = h.store.read_transcript(h.runtime.session_id()).unwrap();
-    assert_eq!(transcript.len(), 2);
-    let assistant_text = transcript[1]
+    assert_eq!(transcript.len(), 3);
+    assert!(
+        transcript[1].is_synthetic(),
+        "the repair prompt is persisted and marked synthetic"
+    );
+    let assistant_text = transcript[2]
         .content
         .iter()
         .find_map(|block| match block {
@@ -680,6 +687,12 @@ async fn incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply() 
         })
         .unwrap();
     assert_eq!(assistant_text, "The complete answer.");
+    assert!(!transcript
+        .iter()
+        .any(|message| message.content.iter().any(|block| matches!(
+            block,
+            localpilot_core::ContentBlock::Text { text } if text.contains("Let me start")
+        ))));
     assert!(drain(&mut rx)
         .iter()
         .any(|event| matches!(event, RuntimeEvent::Recovery { .. })));
@@ -840,4 +853,73 @@ async fn loop_stops_at_the_tool_call_cap() {
 
     let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
     assert_eq!(reason, StopReason::MaxToolCalls);
+}
+
+#[tokio::test]
+async fn transcript_is_derivable_from_the_event_log() {
+    // A representative session: a denied destructive tool call, a malformed
+    // stream that triggers recovery (and a synthetic repair prompt), context
+    // pressure that forces compaction, then a clean answer.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .tool_call(
+                "c1",
+                "run_shell",
+                json!({ "program": "rm", "args": ["-rf", "x"] }),
+            )
+            .malformed()
+            .text("recovered and done"),
+    );
+    let mut h = build_from_arc(
+        Arc::clone(&provider),
+        &[],
+        SessionConfig {
+            interactivity: Interactivity::NonInteractive,
+            context_token_limit: 600,
+            ..SessionConfig::default()
+        },
+        Profile::Default,
+    );
+
+    // A large prompt pushes the history over the small limit so compaction
+    // runs while shaping the request.
+    let prompt = format!("clean up {}", "context ".repeat(500));
+    let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+
+    let session = h.runtime.session_id();
+    let events = h.store.read_events(session).unwrap();
+
+    // The transcript rebuilt from events equals the stored transcript,
+    // including the synthetic repair prompt.
+    let rebuilt = localpilot_store::transcript_from_events(&events);
+    let stored = h.store.read_transcript(session).unwrap();
+    assert_eq!(rebuilt, stored);
+    assert!(stored.iter().any(localpilot_core::Message::is_synthetic));
+
+    // The log carries the full audit trail for this session's shape.
+    use localpilot_store::SessionEventKind as Kind;
+    let has = |predicate: &dyn Fn(&Kind) -> bool| events.iter().any(|event| predicate(&event.kind));
+    assert!(has(&|kind| matches!(kind, Kind::SessionOpened { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::TurnStarted { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::ToolStarted { .. })));
+    assert!(has(&|kind| matches!(
+        kind,
+        Kind::ToolFinished { is_error: true, .. }
+    )));
+    assert!(has(&|kind| matches!(kind, Kind::RecoveryDiagnostic { .. })));
+    assert!(has(&|kind| matches!(kind, Kind::Compacted { .. })));
+    assert!(has(&|kind| matches!(
+        kind,
+        Kind::Message {
+            origin: localpilot_store::MessageOrigin::Synthetic { .. },
+            ..
+        }
+    )));
+    assert!(has(&|kind| matches!(kind, Kind::TurnEnded { .. })));
+
+    // The chain is well-formed: every event descends from its predecessor.
+    for pair in events.windows(2) {
+        assert_eq!(pair[1].parent_id, Some(pair[0].id));
+    }
 }

@@ -19,6 +19,10 @@ pub enum StoreError {
     /// A caller-supplied key was not usable as a file name.
     #[error("invalid storage key: {0}")]
     InvalidKey(String),
+
+    /// A record was written by a format version this build cannot read.
+    #[error("unsupported record format version {found} (this build reads up to {supported})")]
+    UnsupportedFormat { found: u64, supported: u32 },
 }
 
 impl StoreError {

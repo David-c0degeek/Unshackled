@@ -2,6 +2,37 @@
 
 This file starts the decision log. Add new records at the top.
 
+## ADR-0011: Store Convergence — Execution Record vs Memory
+
+Status: proposed
+
+LocalPilot persists state in two stacks, which were growing toward overlap.
+This record fixes the ownership boundary:
+
+- **The LocalPilot store (`.localpilot/`) is the execution record, and only
+  that**: transcripts, the durable session event log (tree-shaped, format-
+  versioned), caches, tool-output snapshots, provider metadata, and recovery
+  diagnostics. It never grows memory, lesson, retrieval, or review features.
+- **LocalMind (`.localmind/`) is the only memory and learning backend**:
+  session closeout, candidate lessons, the review queue, accepted memory,
+  retrieval/context injection, skill drafts, and audit. New rich-learning
+  behavior lands in LocalMind, never as a host-local memory implementation.
+- **One redaction authority at the host boundary.** LocalPilot's redaction
+  stack (`localpilot-config::redact`) is the canonical redactor: everything
+  the host persists or hands to LocalMind is redacted by it first. LocalMind's
+  import-time redaction remains as engine-internal defense in depth, not a
+  second authority — divergence between the two pattern sets is resolved by
+  updating the host stack.
+
+Reason:
+
+- two stores with drifting responsibilities and two redaction pattern sets is
+  how secrets leak and how features get implemented twice
+- the event log needs a single unambiguous home (the execution record) before
+  later features (headless drive, hooks, subagents) build on it
+- LocalMind is host-neutral and reusable; baking memory into the LocalPilot
+  store would fork that capability
+
 ## ADR-0010: Reliability Contract for Unattended Operation
 
 Status: accepted

@@ -1,4 +1,4 @@
-﻿//! Strongly-typed identifiers.
+//! Strongly-typed identifiers.
 //!
 //! Each identifier is a distinct newtype so they cannot be transposed. Session,
 //! turn, and message identifiers are UUIDs minted by LocalPilot. A tool-use
@@ -77,6 +77,11 @@ uuid_newtype! {
 uuid_newtype! {
     /// Identifies a single message within a session.
     MessageId
+}
+
+uuid_newtype! {
+    /// Identifies one entry in a session's durable event log.
+    EventId
 }
 
 /// Correlates a tool call with its result. This wraps the provider-assigned

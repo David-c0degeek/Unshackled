@@ -1,4 +1,4 @@
-﻿//! `harness resume`: run the next plan step end to end — work the step through
+//! `harness resume`: run the next plan step end to end — work the step through
 //! the session loop, run configured tests, evaluate the completion rules, then
 //! commit the step and the progress update.
 
@@ -9,8 +9,10 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use localpilot_config::{AutoFix, Cadence, CheckConfig};
+use localpilot_core::StructuredSummary;
 use localpilot_llm::QuotaInfo;
 use localpilot_quota::{estimate_window, PausedRun};
+use localpilot_store::SessionEventKind;
 
 use crate::decisions::{today, Decisions};
 use crate::error::HarnessError;
@@ -131,6 +133,15 @@ pub async fn resume_one_step_with_events(
 
     let commit_message = format!("harness: {}", step.description);
 
+    // The step is a branch in the event tree: attempts chain from here, an
+    // abandoned attempt closes with a structured summary, and a fresh attempt
+    // forks back to this anchor.
+    runtime.record_event(SessionEventKind::StepStarted {
+        number: step.number,
+        description: step.description.clone(),
+    });
+    let step_anchor = runtime.last_event_id();
+
     // The anti-sunk-cost loop owns the attempt/replan budget; each pass works the
     // step, runs the step-cadence gate, and turns the findings into a verdict.
     let mut step_loop = StepLoop::new(max_attempts.max(1), MAX_REPLANS);
@@ -217,11 +228,28 @@ pub async fn resume_one_step_with_events(
             }
             // An actionable finding: feed it back through the anti-sunk-cost loop.
             StepAction::Retry(reason) => match step_loop.on_attempt(AttemptResult::Retry(reason)) {
-                StepDecision::RetrySameContext(feedback)
-                | StepDecision::DiscardAndReset(feedback) => {
+                StepDecision::RetrySameContext(feedback) => {
+                    prompt = retry_prompt(&step, &feedback);
+                }
+                StepDecision::DiscardAndReset(feedback) => {
+                    // The abandoned attempt closes its branch with a digest of
+                    // what failed, and the fresh attempt forks from the step
+                    // anchor, so the discarded line of work stays auditable.
+                    runtime.record_event(SessionEventKind::BranchClosed {
+                        summary: StructuredSummary::new(
+                            "Step attempt abandoned:",
+                            vec![feedback.clone()],
+                        ),
+                    });
+                    if let Some(from) = step_anchor {
+                        runtime.record_event(SessionEventKind::BranchForked { from });
+                    }
                     prompt = retry_prompt(&step, &feedback);
                 }
                 StepDecision::Replan(logs) => {
+                    runtime.record_event(SessionEventKind::BranchClosed {
+                        summary: StructuredSummary::new("Step attempt abandoned:", logs.clone()),
+                    });
                     record_replan(root, &progress.name, step.number, &logs)?;
                     return Ok(ResumeOutcome {
                         step_number: step.number,
@@ -268,6 +296,12 @@ pub async fn resume_one_step_with_events(
                 .to_string(),
         )
     };
+
+    runtime.record_event(SessionEventKind::StepCompleted {
+        number: step.number,
+        commit: hash.clone(),
+        attempts: step_loop.replans() + 1,
+    });
 
     // Update and commit progress.
     progress.mark_complete(step.number, hash, step_loop.replans() + 1);
