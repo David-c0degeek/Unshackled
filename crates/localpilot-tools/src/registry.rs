@@ -109,7 +109,9 @@ impl ToolRegistry {
             }
         };
 
-        let detail = target_detail(&call.input);
+        // The tool supplies its own approval detail — it knows its schema; the
+        // registry does not guess at input keys. Display-only, never decisive.
+        let detail = tool.approval_detail(&call.input);
         for effect in &effects {
             let request = PermissionRequest {
                 tool: tool.name().to_string(),
@@ -154,36 +156,6 @@ impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// A short description of a tool call's concrete target, drawn from the common
-/// input fields, for an approval prompt. Returns an empty string when none is
-/// present. The value is not trusted for any decision — it is display only.
-fn target_detail(input: &Value) -> String {
-    for key in ["command", "path", "url", "pattern", "query"] {
-        if let Some(value) = input.get(key).and_then(Value::as_str) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                let mut shown: String = trimmed.chars().take(120).collect();
-                if trimmed.chars().count() > 120 {
-                    shown.push('…');
-                }
-                return shown;
-            }
-        }
-    }
-    if let Some(paths) = input.get("paths").and_then(Value::as_array) {
-        let joined = paths
-            .iter()
-            .filter_map(Value::as_str)
-            .take(6)
-            .collect::<Vec<_>>()
-            .join(", ");
-        if !joined.is_empty() {
-            return joined;
-        }
-    }
-    String::new()
 }
 
 fn format_tool_output(tool: &str, output: &str, is_error: bool) -> String {
