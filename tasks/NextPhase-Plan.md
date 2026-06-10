@@ -182,7 +182,8 @@ must not re-enter via any box (D002).
 | Lint/format | `cargo fmt --check` then `cargo clippy --workspace --all-targets -- -D warnings` | both must be clean |
 | Dep hygiene | `cargo machete` | on dependency change only |
 | Release hygiene | `cargo deny check` and `cargo audit` | before a release milestone only |
-| Plan-specific gate | TBD | invariant/regression test invocations; filled by 01.2 and 02.2 once the tests exist |
+| Plan-specific gate (tool pairing) | `cargo test -p localpilot-harness --test pairing` | pairing invariant: scenario tests + 48-case property run (01.2) |
+| Plan-specific gate (permissions) | TBD | filled by 02.2 once the tests exist |
 
 ---
 
@@ -219,6 +220,8 @@ must not re-enter via any box (D002).
 | D002 | 2026-06-09 | Scope cut for this plan | Subagents + manifest plugins, HTTP server, remote MCP/OAuth, LSP, webfetch/websearch are out of this plan (follow-on); research §1a items (web/desktop/SDK/cloud) are hard-deferred and may not re-enter via any box. | Subagents/plugins depend on the event tree (03), hook fabric (06), and a hardened permission engine (02) — planning them now is speculative. §1a items contradict the identity contract per research. Template caps plans at 8 subjects; this plan is full. | §1; research §1a, §5.13, §9 |
 | D003 | 2026-06-09 | Research doc supersedes survey doc | `tasks/localpilot-next-phase-research.md` is the authoritative feature source; `tasks/opencode-vs-localpilot.md` is background, cited only where the research doc lacks detail. | The research doc post-dates and explicitly supersedes the survey (adds Pi, identity contract, deferred list). Two authorities invite drift. | §2 |
 | D004 | 2026-06-09 | Compaction work split across subjects | Compaction *correctness* fixes (oversized-exchange truncation pass, incremental flood check, cached result) land in subject 03; the *window-relative* trigger and iterative summary land in subject 04. | Window-relative math needs real per-model context windows, which only exist after the catalog (04). Sequencing them together would stall the correctness fixes behind the catalog. | 03.6, 04.6; review-technical §3.2–§3.4; research §5.4 |
+| D005 | 2026-06-10 | Blank-id tool calls are filtered, not synthesized | 01.1's box literal says "synthesize an error tool_result per unexecuted call". A call whose id is blank can never be validly answered (a tool_result must reference a non-empty tool_use id), so the loop validates *before* persisting: blank-id `tool_use` blocks never enter history, and the model is corrected via a persisted user message instead; calls with usable ids get the synthesized rejection result as specified. | Pairing the unpairable would re-violate the wire contract the box exists to protect. Filtering keeps the invariant trivially true for the degenerate case and synthesizes results for every answerable call. | 01.1, 01.2; `tasks/next-phase/01-wire-contract-and-streaming.md` |
+| D006 | 2026-06-10 | Late system messages are positional on every wire | A mid-conversation system message keeps its position: OpenAI-style wires send it in place as `role:"system"`; the Anthropic-style wire hoists only the *leading* system run and delivers later system content as user-role blocks at its original position. Spec text in docs/04 §Late System Messages. | The previous behavior silently time-traveled late system content to the front on one wire only — same history, different model-visible conversation per provider. Positional delivery is the only semantics that is uniform and preserves author intent. | 01.8; docs/04 |
 
 ---
 
@@ -232,7 +235,7 @@ must not re-enter via any box (D002).
 | Done | # | File | Status | Owner summary | Human actions mirrored? |
 |---|---|---|---|---|---|
 | [x] | 00 | `tasks/next-phase/00-tooling-research-and-readiness.md` | DONE | agent: 8 | n/a |
-| [ ] | 01 | `tasks/next-phase/01-wire-contract-and-streaming.md` | TODO | agent: 8 | n/a |
+| [x] | 01 | `tasks/next-phase/01-wire-contract-and-streaming.md` | DONE | agent: 8 | n/a |
 | [ ] | 02 | `tasks/next-phase/02-permission-engine-hardening.md` | TODO | agent: 7; product-owner: 1 | yes |
 | [ ] | 03 | `tasks/next-phase/03-durable-session-events.md` | TODO | agent: 6; product-owner: 1 | yes |
 | [ ] | 04 | `tasks/next-phase/04-model-catalog-and-budgets.md` | TODO | agent: 6; product-owner: 1 | yes |
