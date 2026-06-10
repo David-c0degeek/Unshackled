@@ -62,6 +62,16 @@ pub trait Tool: Send + Sync {
     /// Returns [`ToolError::InvalidInput`] if the input does not parse.
     fn effects(&self, input: &Value, ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError>;
 
+    /// A short, human-readable description of the concrete target this call
+    /// acts on (the command line, path, or query), shown in approval prompts so
+    /// the user sees *what* they are approving. Display-only — never an input
+    /// to a permission decision. Every tool with side effects must supply one;
+    /// the default empty string is acceptable only for effect-free tools.
+    fn approval_detail(&self, input: &Value) -> String {
+        let _ = input;
+        String::new()
+    }
+
     /// Execute the tool. Only called after every effect has been authorized.
     ///
     /// # Errors
@@ -80,4 +90,15 @@ pub(crate) fn parse_input<T: serde::de::DeserializeOwned>(input: &Value) -> Resu
 /// Generate a JSON schema value from a typed input struct.
 pub(crate) fn schema_for<T: schemars::JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).unwrap_or(Value::Null)
+}
+
+/// Bound an approval-prompt detail string to a displayable length.
+pub(crate) fn detail_preview(text: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let trimmed = text.trim();
+    let mut shown: String = trimmed.chars().take(MAX_CHARS).collect();
+    if trimmed.chars().count() > MAX_CHARS {
+        shown.push('…');
+    }
+    shown
 }

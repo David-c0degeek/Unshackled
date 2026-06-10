@@ -1,4 +1,4 @@
-﻿# Harness Specification
+# Harness Specification
 
 ## Definition
 
@@ -389,6 +389,40 @@ Findings map to verdicts:
 
 Auto-fix edits are ordinary project-write side effects and are subject to the
 permission profile and commit policy like any other change.
+
+## Reliability Contract — Session-Loop Invariants
+
+These invariants are the loop half of the reliability contract (ADR-0010):
+what the session runtime guarantees on *every* exit path — success, rejected
+tool batch, tool-budget exhaustion, cancellation, stream error. They are what
+makes unattended multi-step execution trustworthy rather than aspirational.
+Each is pinned by a named test; breaking the test is a contract change and
+needs an ADR.
+
+1. **Tool pairing.** After any turn, every `tool_use` block in the persisted
+   history has exactly one matching `tool_result`, in call order. A call that
+   is rejected or never executed receives a synthesized error result; a call
+   that can never be answered (blank id) never enters history. Providers
+   reject unpaired histories, so this is what keeps an unattended run from
+   poisoning its own next request. Enforced by the
+   `localpilot-harness` `pairing` test suite
+   (`cargo test -p localpilot-harness --test pairing`), including a property
+   run over arbitrary turn interleavings.
+2. **No partial replies persist.** A turn that ends in cancellation or a
+   stream error persists no partial assistant message; the transcript stays
+   consistent and resumable. Enforced by
+   `cancellation_leaves_a_consistent_transcript` and
+   `incomplete_stream_is_retried_and_never_persisted_as_a_finished_reply`
+   (`localpilot-harness`).
+3. **Transcript fidelity.** The persisted transcript equals the model-visible
+   history: any message that shapes the conversation is persisted (or
+   explicitly marked synthetic). Synthesized tool results and corrective user
+   messages are persisted today; full fidelity (including repair prompts)
+   lands with the durable session store and is pinned by its
+   transcript-equivalence test when it does.
+
+The permission half of the contract lives in
+[`docs/07`](07-security-and-privacy.md) §Reliability Contract.
 
 ## Anti-Sunk-Cost Loop
 

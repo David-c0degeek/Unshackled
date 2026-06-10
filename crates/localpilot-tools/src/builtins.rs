@@ -11,7 +11,34 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::ToolError;
-use crate::tool::{parse_input, schema_for, Tool, ToolContext, ToolOutput};
+use crate::tool::{detail_preview, parse_input, schema_for, Tool, ToolContext, ToolOutput};
+
+/// Approval detail from a single string field of the input. Tools know their
+/// own schema; this is a typed read, not cross-tool key-guessing.
+fn string_field_detail(input: &Value, key: &str) -> String {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(detail_preview)
+        .unwrap_or_default()
+}
+
+/// Approval detail for a `paths` array field, joined for display.
+fn paths_detail(input: &Value, prefix: &str) -> String {
+    let joined = input
+        .get("paths")
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    detail_preview(&format!("{prefix} {joined}"))
+}
 
 /// Cap on a tool's textual output before truncation.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -95,6 +122,9 @@ impl Tool for ReadFile {
     fn name(&self) -> &'static str {
         "read_file"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "Read UTF-8 text from a file in the workspace, optionally a line range."
     }
@@ -151,6 +181,9 @@ impl Tool for WriteFile {
     fn name(&self) -> &'static str {
         "write_file"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "Create or replace a file in the workspace, preserving newline style."
     }
@@ -170,13 +203,16 @@ impl Tool for WriteFile {
     async fn invoke(&self, input: Value, ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
         let input: WriteFileInput = parse_input(&input)?;
         let path = ctx.workspace.normalize(Path::new(&input.path))?;
-        let existing = std::fs::read_to_string(&path).ok();
-        if existing.is_some() && input.overwrite == Some(false) {
+        // Existence is checked on the path itself: a non-UTF-8 (binary) file
+        // fails `read_to_string` but must still refuse an overwrite=false
+        // write. The lossy read is used only for newline detection.
+        if path.exists() && input.overwrite == Some(false) {
             return Err(ToolError::Failed(format!(
                 "{} exists and overwrite is false",
                 path.display()
             )));
         }
+        let existing = std::fs::read_to_string(&path).ok();
         let newline = existing.as_deref().map_or("\n", detect_newline);
         let body = apply_newline(&input.content, newline);
         atomic_write(&path, body.as_bytes())?;
@@ -206,6 +242,9 @@ pub struct EditFile;
 impl Tool for EditFile {
     fn name(&self) -> &'static str {
         "edit_file"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
     }
     fn description(&self) -> &'static str {
         "Replace an exact, unique snippet in a workspace file; rejects ambiguous edits."
@@ -263,6 +302,9 @@ pub struct MultiEdit;
 impl Tool for MultiEdit {
     fn name(&self) -> &'static str {
         "multi_edit"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
     }
     fn description(&self) -> &'static str {
         "Apply several exact text replacements to one workspace file atomically; rejects missing or ambiguous context."
@@ -334,6 +376,9 @@ impl Tool for ListFiles {
     fn name(&self) -> &'static str {
         "list_files"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "path")
+    }
     fn description(&self) -> &'static str {
         "List files under a workspace directory, respecting ignore files."
     }
@@ -404,6 +449,9 @@ pub struct FindFiles;
 impl Tool for FindFiles {
     fn name(&self) -> &'static str {
         "find_files"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "pattern")
     }
     fn description(&self) -> &'static str {
         "Find workspace files by filename pattern, respecting ignore files."
@@ -496,6 +544,9 @@ impl Tool for SearchText {
     fn name(&self) -> &'static str {
         "search_text"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "query")
+    }
     fn description(&self) -> &'static str {
         "Search workspace files for text or a regex, respecting ignore files."
     }
@@ -585,6 +636,25 @@ impl Tool for RunShell {
     fn name(&self) -> &'static str {
         "run_shell"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        // The user must see the full command line they are approving.
+        let program = input.get("program").and_then(Value::as_str).unwrap_or("");
+        let args = input
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|args| {
+                args.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        if args.is_empty() {
+            detail_preview(program)
+        } else {
+            detail_preview(&format!("{program} {args}"))
+        }
+    }
     fn description(&self) -> &'static str {
         "Run a command as an argument list (no shell), with a timeout."
     }
@@ -648,6 +718,9 @@ impl Tool for GitStatus {
     fn name(&self) -> &'static str {
         "git_status"
     }
+    fn approval_detail(&self, _input: &Value) -> String {
+        "git status".to_string()
+    }
     fn description(&self) -> &'static str {
         "Show the working tree status (read-only)."
     }
@@ -679,6 +752,9 @@ pub struct GitDiff;
 impl Tool for GitDiff {
     fn name(&self) -> &'static str {
         "git_diff"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git diff")
     }
     fn description(&self) -> &'static str {
         "Show unstaged or staged git diff output for optional paths."
@@ -717,6 +793,9 @@ impl Tool for GitLog {
     fn name(&self) -> &'static str {
         "git_log"
     }
+    fn approval_detail(&self, _input: &Value) -> String {
+        "git log".to_string()
+    }
     fn description(&self) -> &'static str {
         "Show recent git commits in one-line form."
     }
@@ -746,6 +825,9 @@ impl Tool for GitAdd {
     fn name(&self) -> &'static str {
         "git_add"
     }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git add")
+    }
     fn description(&self) -> &'static str {
         "Stage specific workspace paths with git add."
     }
@@ -774,6 +856,9 @@ pub struct GitRestore;
 impl Tool for GitRestore {
     fn name(&self) -> &'static str {
         "git_restore"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git restore")
     }
     fn description(&self) -> &'static str {
         "Discard working-tree changes for specific paths with git restore; requires destructive-command approval."
@@ -812,6 +897,9 @@ pub struct GitCommit;
 impl Tool for GitCommit {
     fn name(&self) -> &'static str {
         "git_commit"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        paths_detail(input, "git commit")
     }
     fn description(&self) -> &'static str {
         "Create a commit from intended files; rejects secret-bearing messages."

@@ -499,3 +499,141 @@ async fn bypass_still_redacts_output_and_keeps_the_workspace_boundary() {
     assert!(escape.output.contains("permission denied"));
     assert!(!outside_path.exists());
 }
+
+/// An approver that records each request it is consulted for, then approves.
+struct RecordingApprover {
+    requests: std::sync::Mutex<Vec<localpilot_sandbox::PermissionRequest>>,
+}
+
+impl RecordingApprover {
+    fn new() -> Self {
+        Self {
+            requests: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    fn seen(&self) -> Vec<localpilot_sandbox::PermissionRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl localpilot_sandbox::Approver for RecordingApprover {
+    fn approve<'a>(
+        &'a self,
+        request: &'a localpilot_sandbox::PermissionRequest,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + 'a>> {
+        self.requests.lock().unwrap().push(request.clone());
+        Box::pin(async { true })
+    }
+}
+
+#[tokio::test]
+async fn run_shell_approval_prompt_shows_the_full_command_line() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+    let approver = RecordingApprover::new();
+
+    // A destructive command asks; the prompt must carry program + args.
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "run_shell",
+        json!({ "program": "rm", "args": ["-rf", "build"] }),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty(), "a destructive command must prompt");
+    for request in &seen {
+        assert_eq!(
+            request.detail, "rm -rf build",
+            "the user must see what they are approving"
+        );
+    }
+}
+
+#[tokio::test]
+async fn write_file_approval_prompt_shows_the_path() {
+    let (_dir, ws) = workspace_with(&[("existing.txt", "old")]);
+    let registry = ToolRegistry::with_builtins();
+    // Untrusted workspace so the write asks instead of auto-allowing.
+    let c = ctx(&ws, Interactivity::Interactive, false);
+    let approver = RecordingApprover::new();
+
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "write_file",
+        json!({ "path": "existing.txt", "content": "new" }),
+    );
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty());
+    assert_eq!(seen[0].detail, "existing.txt");
+}
+
+#[tokio::test]
+async fn allowlisted_run_shell_still_prompts_for_destructive_commands() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+    let relaxed = PermissionEngine::new(Profile::Relaxed, vec!["run_shell".to_string()]);
+
+    // Destructive: the allowlist must not lift the gate — the approver is
+    // consulted.
+    let approver = RecordingApprover::new();
+    let call = ToolCall::new(
+        ToolUseId::from("c1"),
+        "run_shell",
+        json!({ "program": "rm", "args": ["-rf", "build"] }),
+    );
+    let _ = registry.dispatch(&call, &c, &relaxed, &approver).await;
+    assert!(
+        !approver.seen().is_empty(),
+        "allowlisting run_shell must not auto-approve destructive commands"
+    );
+
+    // A wrapped command never classifies below Unknown, so it prompts too.
+    let approver = RecordingApprover::new();
+    let call = ToolCall::new(
+        ToolUseId::from("c2"),
+        "run_shell",
+        json!({ "program": "bash", "args": ["-c", "echo hi"] }),
+    );
+    let _ = registry.dispatch(&call, &c, &relaxed, &approver).await;
+    assert!(
+        !approver.seen().is_empty(),
+        "shell wrappers are never auto-allowed"
+    );
+}
+
+#[tokio::test]
+async fn write_file_refuses_to_clobber_a_binary_file_when_overwrite_is_false() {
+    let dir = tempfile::tempdir().unwrap();
+    // A non-UTF-8 target: read_to_string fails on it, but it exists.
+    std::fs::write(dir.path().join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+    let ws = Workspace::new(dir.path()).unwrap();
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+
+    let result = dispatch(
+        &registry,
+        "write_file",
+        json!({ "path": "blob.bin", "content": "text", "overwrite": false }),
+        &c,
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+
+    assert!(result.is_error, "{}", result.output);
+    assert!(result.output.contains("exists and overwrite is false"));
+    // The binary content is untouched.
+    assert_eq!(
+        std::fs::read(dir.path().join("blob.bin")).unwrap(),
+        vec![0u8, 159, 146, 150]
+    );
+}

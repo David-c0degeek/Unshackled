@@ -1,6 +1,41 @@
-﻿# Architecture Decision Records
+# Architecture Decision Records
 
 This file starts the decision log. Add new records at the top.
+
+## ADR-0010: Reliability Contract for Unattended Operation
+
+Status: proposed
+
+LocalPilot's differentiator is unattended multi-step execution. That claim is
+made testable by an explicit **reliability contract**: a small set of named
+invariants the runtime guarantees on every exit path, each pinned by a named
+test, split across the owning specs:
+
+- Session-loop invariants (tool-result pairing on every exit path, no partial
+  replies persisted, transcript fidelity) —
+  [`docs/06`](06-harness-spec.md) §Reliability Contract.
+- Permission invariants (no `run_shell` path weaker than the equivalent
+  builtin, floor-aware allowlists that never lift destructive/privileged/
+  unknown gating, wrapper commands never auto-allowed, approval prompts that
+  state their target) — [`docs/07`](07-security-and-privacy.md) §Reliability
+  Contract.
+
+A change that breaks a contract-pinning test is a contract change: it requires
+a superseding ADR, not a test edit. The bypass profile's scope is part of the
+contract: bypass keeps the workspace boundary for path-bearing effects only;
+shell commands are not path-contained, and the docs state this rather than
+implying containment that does not exist.
+
+Reason:
+
+- the product's central claim ("every side effect passes a typed permission
+  engine"; "safe to run unsupervised") was previously aspiration enforced
+  only by convention — line-level review found exit paths and classification
+  gaps that falsified it
+- invariants stated in the spec and enforced by property tests survive
+  refactors; workflow descriptions do not
+- naming the tests in the spec makes the contract auditable: a reader can run
+  the contract
 
 ## ADR-0009: Discovered Project Quality Gate
 

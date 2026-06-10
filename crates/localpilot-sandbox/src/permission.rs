@@ -25,8 +25,11 @@ pub enum Profile {
     Default,
     /// A user allowlist auto-approves common safe actions; the rest still prompt.
     Relaxed,
-    /// A launch mode that approves everything with no prompts. Never the default;
-    /// does not lift the workspace boundary, redaction, or logging.
+    /// A launch mode that approves everything with no prompts. Never the
+    /// default. Path-bearing effects (the file tools) keep the workspace
+    /// boundary, and redaction/logging stay on — but shell commands carry no
+    /// path information, so bypass auto-allows any command class; a command's
+    /// own file access is not contained. See docs/07 §Permission Profiles.
     Bypass,
 }
 
@@ -112,8 +115,10 @@ impl PermissionEngine {
     pub fn decide(&self, request: &PermissionRequest) -> Decision {
         match self.profile {
             Profile::Bypass => {
-                // Approve everything except an out-of-workspace path effect: the
-                // workspace boundary is not silently lifted by bypass.
+                // Approve everything except an out-of-workspace *path* effect:
+                // the workspace boundary is not silently lifted by bypass for
+                // the file tools. Commands carry no path information and are
+                // allowed as-is (see the Profile::Bypass docs).
                 if request.effect.is_outside_workspace() {
                     Decision::Deny
                 } else {
@@ -121,15 +126,44 @@ impl PermissionEngine {
                 }
             }
             Profile::Relaxed => {
-                let base = if self.allowlist.iter().any(|t| t == &request.tool) {
+                // The allowlist is floor-aware: it auto-approves an
+                // allowlisted tool only for effects below the risk floor
+                // (including non-interactive runs — this is how the ratified
+                // quality gate runs headless, ADR-0009). Destructive,
+                // privileged, unknown, and external-write commands,
+                // secret-like reads, and out-of-workspace paths keep their
+                // gate regardless of the allowlist.
+                let decision = if allowlist_may_relax(request.effect)
+                    && self.allowlist.iter().any(|t| t == &request.tool)
+                {
                     Decision::Allow
                 } else {
                     base_decision(request)
                 };
-                untrusted_floor(base, request.trusted)
+                untrusted_floor(decision, request.trusted)
             }
             Profile::Default => untrusted_floor(base_decision(request), request.trusted),
         }
+    }
+}
+
+/// Whether a relaxed-profile allowlist may auto-approve this effect. The
+/// allowlist exists to stop prompt fatigue for routine actions; it must never
+/// become a standing grant for the classes the class table exists to gate.
+fn allowlist_may_relax(effect: Effect) -> bool {
+    match effect {
+        Effect::RunCommand(class) => matches!(
+            class,
+            CommandClass::ReadOnly | CommandClass::ProjectWrite | CommandClass::Network
+        ),
+        Effect::ReadPath {
+            inside_workspace,
+            secret_like,
+        } => inside_workspace && !secret_like,
+        Effect::WritePath {
+            inside_workspace, ..
+        } => inside_workspace,
+        Effect::Network => true,
     }
 }
 
@@ -360,6 +394,79 @@ mod tests {
         // A non-listed tool still follows the table.
         request.tool = "write_file".to_string();
         assert_eq!(e.decide(&request), Decision::Ask);
+    }
+
+    #[test]
+    fn allowlist_never_lifts_destructive_privileged_or_unknown_commands() {
+        // Allowlisting `run_shell` (the obvious prompt-fatigue move) must not
+        // auto-approve the classes the class table exists to gate.
+        let e = PermissionEngine::new(Profile::Relaxed, vec!["run_shell".to_string()]);
+        for class in [
+            CommandClass::Destructive,
+            CommandClass::Privileged,
+            CommandClass::Unknown,
+            CommandClass::ExternalWrite,
+        ] {
+            let mut request = req(Effect::RunCommand(class), Interactivity::Interactive, true);
+            request.tool = "run_shell".to_string();
+            assert_eq!(e.decide(&request), Decision::Ask, "class {class:?}");
+
+            let mut request = req(
+                Effect::RunCommand(class),
+                Interactivity::NonInteractive,
+                true,
+            );
+            request.tool = "run_shell".to_string();
+            assert_eq!(e.decide(&request), Decision::Deny, "class {class:?}");
+        }
+    }
+
+    #[test]
+    fn allowlist_still_relaxes_the_low_risk_command_classes() {
+        // Both interactive and non-interactive: the ratified headless quality
+        // gate (ADR-0009) relies on the non-interactive allowance.
+        let e = PermissionEngine::new(Profile::Relaxed, vec!["run_shell".to_string()]);
+        for class in [
+            CommandClass::ReadOnly,
+            CommandClass::ProjectWrite,
+            CommandClass::Network,
+        ] {
+            for interactivity in [Interactivity::Interactive, Interactivity::NonInteractive] {
+                let mut request = req(Effect::RunCommand(class), interactivity, true);
+                request.tool = "run_shell".to_string();
+                assert_eq!(
+                    e.decide(&request),
+                    Decision::Allow,
+                    "class {class:?} {interactivity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn allowlist_never_lifts_secret_reads_or_out_of_workspace_paths() {
+        let e = PermissionEngine::new(Profile::Relaxed, vec!["read_file".to_string()]);
+        let mut secret = req(
+            Effect::ReadPath {
+                inside_workspace: true,
+                secret_like: true,
+            },
+            Interactivity::Interactive,
+            true,
+        );
+        secret.tool = "read_file".to_string();
+        assert_eq!(e.decide(&secret), Decision::Ask);
+
+        let mut outside = req(
+            Effect::ReadPath {
+                inside_workspace: false,
+                secret_like: false,
+            },
+            Interactivity::Interactive,
+            true,
+        );
+        outside.tool = "read_file".to_string();
+        assert_eq!(e.decide(&outside), Decision::Ask);
     }
 
     #[test]
