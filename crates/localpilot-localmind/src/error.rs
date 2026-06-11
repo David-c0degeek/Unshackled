@@ -1,4 +1,4 @@
-﻿//! Adapter errors.
+//! Adapter errors.
 
 /// An error from the LocalMind learning adapter.
 #[derive(Debug, thiserror::Error)]
@@ -35,4 +35,8 @@ pub enum LearningError {
     /// A skill-draft operation failed.
     #[error("localmind skill: {0}")]
     Skill(String),
+
+    /// A code-graph operation failed.
+    #[error("localmind code graph: {0}")]
+    Graph(String),
 }

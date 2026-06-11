@@ -55,4 +55,25 @@ pub fn close_out(cwd: &Path, session: localpilot_core::SessionId) {
         ),
         Err(error) => eprintln!("learning: closeout skipped ({error})"),
     }
+
+    // Keep the code graph current while the workspace is quiet. Bounded so a
+    // large edit burst cannot stall shutdown; leftovers wait for the next
+    // session close, and an up-to-date graph is a cheap no-op.
+    match localpilot_localmind::codegraph_reindex(cwd, CODEGRAPH_BATCH_LIMIT) {
+        Ok(summary) if summary.reindexed + summary.pruned > 0 => eprintln!(
+            "learning: code graph updated — {} file(s) reindexed, {} pruned{}",
+            summary.reindexed,
+            summary.pruned,
+            if summary.remaining > 0 {
+                ", more queued for next session"
+            } else {
+                ""
+            }
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("learning: code graph reindex skipped ({error})"),
+    }
 }
+
+/// How many files one session-close reindex pass may touch.
+const CODEGRAPH_BATCH_LIMIT: usize = 64;

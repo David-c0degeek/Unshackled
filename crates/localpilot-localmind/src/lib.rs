@@ -8,12 +8,14 @@
 //! LocalMind's contracts and drives the loop; LocalMind never depends back.
 #![forbid(unsafe_code)]
 
+mod codegraph;
 mod error;
 mod ops;
 
 use std::fmt::Write as _;
 use std::path::Path;
 
+pub use codegraph::{codegraph_reindex, CodeGraphSummary};
 pub use ops::{
     audit, context_for, memory_delete, memory_disable_injection, memory_injection_enabled,
     memory_list, promote, review_decide, review_list, review_show, search, skill_body, skill_show,

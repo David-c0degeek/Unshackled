@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "localpilot-localmind"
 version = "0.1.0"
 edition.workspace = true
@@ -9,6 +9,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+ignore = { workspace = true }
+localmind-codegraph = { path = "../../external/localmind/crates/localmind-codegraph" }
 localmind-core = { path = "../../external/localmind/crates/localmind-core" }
 localmind-store = { path = "../../external/localmind/crates/localmind-store" }
 thiserror = { workspace = true }
