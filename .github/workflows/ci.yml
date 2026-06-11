@@ -61,7 +61,7 @@ jobs:
       # Line-coverage floor over the workspace. The floor is a ratchet: set
       # from the measured baseline, raised deliberately, never lowered to
       # admit a regression.
-      - run: cargo llvm-cov nextest --workspace --fail-under-lines 60
+      - run: cargo llvm-cov nextest --workspace --fail-under-lines 75
       - run: cargo llvm-cov report --lcov --output-path coverage.lcov
       - uses: actions/upload-artifact@v4
         with:
