@@ -15,7 +15,10 @@ mod ops;
 use std::fmt::Write as _;
 use std::path::Path;
 
-pub use codegraph::{codegraph_reindex, CodeGraphSummary};
+pub use codegraph::{
+    codegraph_export, codegraph_inspect, codegraph_reindex, CodeGraphSummary, ExportFormat,
+    SymbolReport,
+};
 pub use ops::{
     audit, context_for, memory_delete, memory_disable_injection, memory_injection_enabled,
     memory_list, promote, review_decide, review_list, review_show, search, skill_body, skill_show,

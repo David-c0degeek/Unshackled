@@ -79,9 +79,147 @@ fn source_candidates(project_root: &Path) -> Vec<PathBuf> {
     candidates
 }
 
+/// A symbol's place in the graph, flattened for display: the symbol itself,
+/// what surrounds it, what tests it, and what was learned about it.
+#[derive(Clone, Debug, Default)]
+pub struct SymbolReport {
+    pub kind: String,
+    pub qualified_name: String,
+    pub path: Option<String>,
+    pub skeleton: Option<String>,
+    /// `kind  qualified_name` lines for each neighbor.
+    pub neighbors: Vec<String>,
+    pub tests: Vec<String>,
+    /// `(memory id, anchor confidence, body snippet)` per anchored entry.
+    pub knowledge: Vec<(String, f32, String)>,
+}
+
+/// Inspects one symbol through the same tool contracts an MCP host uses.
+/// Plain names work when unique; qualified names disambiguate.
+pub fn codegraph_inspect(project_root: &Path, symbol: &str) -> Result<SymbolReport, LearningError> {
+    let store = GraphStore::open_project(project_root)
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+
+    let neighborhood = localmind_mcp::handle(
+        &store,
+        &localmind_mcp::GraphToolRequest::MemorySymbolNeighborhood {
+            symbol: symbol.to_string(),
+            depth: 1,
+        },
+    )
+    .map_err(|error| LearningError::Graph(error.to_string()))?;
+    let localmind_mcp::GraphToolResponse::Neighborhood {
+        symbol: summary,
+        neighbors,
+    } = neighborhood
+    else {
+        return Err(LearningError::Graph("unexpected tool response".to_string()));
+    };
+
+    let mut report = SymbolReport {
+        kind: summary.kind,
+        qualified_name: summary.qualified_name,
+        path: summary.path,
+        skeleton: summary.skeleton,
+        neighbors: neighbors
+            .iter()
+            .map(|neighbor| format!("{}  {}", neighbor.kind, neighbor.qualified_name))
+            .collect(),
+        ..SymbolReport::default()
+    };
+
+    if let Ok(localmind_mcp::GraphToolResponse::Coverage { tests, .. }) = localmind_mcp::handle(
+        &store,
+        &localmind_mcp::GraphToolRequest::MemorySymbolCoverage {
+            symbol: symbol.to_string(),
+        },
+    ) {
+        report.tests = tests
+            .iter()
+            .map(|test| test.qualified_name.clone())
+            .collect();
+    }
+
+    if let Ok(localmind_mcp::GraphToolResponse::Knowledge { knowledge, .. }) = localmind_mcp::handle(
+        &store,
+        &localmind_mcp::GraphToolRequest::MemorySymbolKnowledge {
+            symbol: symbol.to_string(),
+        },
+    ) {
+        let bodies: Vec<(String, String)> = crate::memory_list(project_root)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| (entry.id, entry.body))
+            .collect();
+        report.knowledge = knowledge
+            .iter()
+            .map(|anchor| {
+                let snippet = bodies
+                    .iter()
+                    .find(|(id, _)| id == &anchor.memory_id)
+                    .map(|(_, body)| body.chars().take(120).collect())
+                    .unwrap_or_default();
+                (anchor.memory_id.clone(), anchor.confidence, snippet)
+            })
+            .collect();
+    }
+    Ok(report)
+}
+
+/// Export format for the local graph artifact.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExportFormat {
+    Json,
+    Html,
+}
+
+/// Writes a redacted snapshot of the active graph to a local file. The
+/// serialized graph passes through the host redaction stack before it touches
+/// disk; nothing leaves the machine.
+pub fn codegraph_export(
+    project_root: &Path,
+    destination: &Path,
+    format: ExportFormat,
+) -> Result<(), LearningError> {
+    let store = GraphStore::open_project(project_root)
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+    let nodes = store
+        .active_nodes()
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+    let edges = store
+        .active_edges()
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+
+    let graph = serde_json::json!({
+        "nodes": nodes,
+        "edges": edges,
+    });
+    let serialized = serde_json::to_string_pretty(&graph)
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+    let redacted = localpilot_config::redact::redact(&serialized);
+
+    let artifact = match format {
+        ExportFormat::Json => redacted,
+        ExportFormat::Html => {
+            let escaped = redacted
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            format!(
+                "<!doctype html>\n<html><head><meta charset=\"utf-8\">\
+                 <title>Workspace code graph</title></head>\
+                 <body><h1>Workspace code graph</h1><pre>{escaped}</pre></body></html>\n"
+            )
+        }
+    };
+    std::fs::write(destination, artifact)
+        .map_err(|error| LearningError::Graph(error.to_string()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::codegraph_reindex;
+    use super::{codegraph_export, codegraph_inspect, codegraph_reindex, ExportFormat};
     use std::fs;
 
     #[test]
@@ -114,6 +252,82 @@ mod tests {
         )?;
         let third = codegraph_reindex(root, usize::MAX)?;
         assert_eq!(third.reindexed, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn inspect_reports_neighbors_tests_and_knowledge() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let root = temp_dir.path();
+        fs::write(root.join(".localmind.toml"), "[learning]\nenabled = true\n")?;
+        fs::create_dir_all(root.join("src"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            r#"
+pub fn answer() -> u8 { 42 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn answer_is_right() {
+        let value = super::answer();
+        assert_eq!(value, 42);
+    }
+}
+"#,
+        )?;
+        codegraph_reindex(root, usize::MAX)?;
+
+        let report = codegraph_inspect(root, "answer")?;
+        assert_eq!(report.qualified_name, "src/lib.rs::answer");
+        assert_eq!(report.kind, "function");
+        assert!(!report.neighbors.is_empty());
+        assert_eq!(report.tests, vec!["src/lib.rs::tests::answer_is_right"]);
+        Ok(())
+    }
+
+    #[test]
+    fn export_is_local_and_redacted() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let root = temp_dir.path();
+        fs::write(root.join(".localmind.toml"), "[learning]\nenabled = true\n")?;
+        fs::create_dir_all(root.join("src"))?;
+        // A secret-shaped literal that ends up in a stored skeleton must not
+        // survive the export gate.
+        let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";
+        fs::write(root.join("src/lib.rs"), "pub fn answer() -> u8 { 42 }\n")?;
+        codegraph_reindex(root, usize::MAX)?;
+        {
+            use localmind_core::{
+                content_fingerprint, Confidence, EvidenceKind, EvidenceRef, GraphNode, NodeKind,
+            };
+            let store = localmind_store::GraphStore::open_project(root)
+                .map_err(|error| format!("open store: {error}"))?;
+            let mut node = GraphNode::new(
+                NodeKind::Function,
+                "connect",
+                "src/lib.rs::connect",
+                content_fingerprint("connect"),
+                EvidenceRef::new(EvidenceKind::CodeParse, "span"),
+                Confidence::new(1.0)?,
+            );
+            node.skeleton = Some(format!("pub fn connect(key: &str /* {secret} */)"));
+            store
+                .upsert_node(&node)
+                .map_err(|error| format!("upsert: {error}"))?;
+        }
+
+        let json_path = root.join("graph.json");
+        codegraph_export(root, &json_path, ExportFormat::Json)?;
+        let exported = fs::read_to_string(&json_path)?;
+        assert!(!exported.contains(secret), "secret leaked into the export");
+        assert!(exported.contains("src/lib.rs::answer"));
+
+        let html_path = root.join("graph.html");
+        codegraph_export(root, &html_path, ExportFormat::Html)?;
+        let html = fs::read_to_string(&html_path)?;
+        assert!(!html.contains(secret));
+        assert!(html.starts_with("<!doctype html>"));
         Ok(())
     }
 }

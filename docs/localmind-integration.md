@@ -53,10 +53,31 @@ depends on LocalMind, never the reverse.
 - `localpilot memory` uses LocalMind accepted memory for status, inspect, search,
   delete, and context-injection disable.
 - Agent turns seed relevant accepted LocalMind memory as best-effort context.
-- Interactive sessions close out into LocalMind on exit.
+- Interactive sessions close out into LocalMind on exit, then run one bounded,
+  incremental pass of the code-graph reindex (content-hash change detection;
+  leftovers wait for the next close).
+- `localpilot memory graph <symbol>` inspects a symbol's graph neighborhood,
+  tests, and anchored lessons; `localpilot memory export <path> [--html]`
+  writes a redacted, local-only snapshot of the graph (host redaction stack
+  applied before write; no network).
+- Promoting an accepted review item anchors the new memory to the code nodes
+  its hints resolve to, so graph retrieval can surface it by structure.
 
 State is project-local under `.localmind/`. Durable memory is readable Markdown;
-queue, audit, and search index state live in SQLite.
+queue, audit, search index, and the code-structure graph live in SQLite.
+
+## Code Graph
+
+LocalMind owns a code-structure knowledge graph (schema, tree-sitter ingestion,
+persistence, traversal, ranked retrieval) populated from files the host feeds
+it through the capture boundary; the engine never walks the filesystem itself.
+The graph honours `.localmind.toml` `excluded_paths`, is offline and
+deterministic (no model, no network in the pipeline), and joins code nodes to
+accepted memory through anchor edges so retrieval traverses code and lessons
+together. Reindexing is incremental and content-hash gated; removed sources
+are superseded rather than deleted, so provenance and anchored knowledge
+survive. The engine also exposes transport-agnostic MCP tool contracts
+(`localmind-mcp`) for structural queries a host MCP server can mount.
 
 ## Signal Mapping
 
@@ -83,6 +104,8 @@ localpilot learning promote <item-id>
 localpilot learning search "<query>"
 localpilot memory inspect
 localpilot memory delete <memory-id>
+localpilot memory graph <symbol>
+localpilot memory export graph.json
 ```
 
 New rich-learning behavior lands in LocalMind, not by expanding host-local memory

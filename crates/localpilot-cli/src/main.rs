@@ -220,6 +220,19 @@ enum MemoryCommand {
     Delete { id: String },
     /// Disable memory injection for this project.
     Disable,
+    /// Show a symbol's graph neighborhood, tests, and anchored lessons.
+    Graph {
+        /// Symbol name; use the qualified name when a plain name is ambiguous.
+        symbol: String,
+    },
+    /// Write a redacted snapshot of the code graph to a local file.
+    Export {
+        /// Destination file path.
+        path: std::path::PathBuf,
+        /// Write HTML instead of JSON.
+        #[arg(long)]
+        html: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -544,6 +557,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 MemoryCommand::Delete { id } => memory_cmd::delete(&cwd, &id, &mut stdout)?,
                 MemoryCommand::Disable => memory_cmd::disable(&cwd, &mut stdout)?,
+                MemoryCommand::Graph { symbol } => {
+                    memory_cmd::graph(&cwd, &symbol, &mut stdout)?;
+                }
+                MemoryCommand::Export { path, html } => {
+                    memory_cmd::export(&cwd, &path, html, &mut stdout)?;
+                }
             }
         }
         Command::Learning { command } => {

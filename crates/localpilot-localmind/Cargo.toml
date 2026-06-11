@@ -12,8 +12,11 @@ workspace = true
 ignore = { workspace = true }
 localmind-codegraph = { path = "../../external/localmind/crates/localmind-codegraph" }
 localmind-core = { path = "../../external/localmind/crates/localmind-core" }
+localmind-mcp = { path = "../../external/localmind/crates/localmind-mcp" }
 localmind-store = { path = "../../external/localmind/crates/localmind-store" }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+localpilot-config = { path = "../localpilot-config" }
 localpilot-core = { path = "../localpilot-core" }
 localpilot-store = { path = "../localpilot-store" }
 

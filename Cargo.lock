@@ -1180,6 +1180,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "localmind-mcp"
+version = "0.1.0"
+dependencies = [
+ "localmind-core",
+ "localmind-store",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "localmind-store"
 version = "0.1.0"
 dependencies = [
@@ -1304,9 +1315,12 @@ dependencies = [
  "ignore",
  "localmind-codegraph",
  "localmind-core",
+ "localmind-mcp",
  "localmind-store",
+ "localpilot-config",
  "localpilot-core",
  "localpilot-store",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]
