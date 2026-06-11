@@ -1362,7 +1362,6 @@ dependencies = [
 name = "localpilot-rpc"
 version = "0.1.0"
 dependencies = [
- "futures",
  "localpilot-core",
  "localpilot-harness",
  "localpilot-llm",
@@ -1376,7 +1375,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]
