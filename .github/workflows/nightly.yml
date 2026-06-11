@@ -40,15 +40,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       # libFuzzer requires a nightly toolchain; the fuzz harness is its own
-      # workspace so this does not touch the MSRV-pinned build.
+      # workspace so this does not touch the MSRV-pinned build. cargo-fuzz
+      # itself builds on stable (its dependency tree does not on some
+      # nightlies), so install with stable and run with nightly.
+      - uses: dtolnay/rust-toolchain@stable
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
-      - run: cargo install cargo-fuzz --locked
-      - run: cargo fuzz run openai_sse -- -max_total_time=120
+      - run: cargo +stable install cargo-fuzz --locked
+      - run: cargo +nightly fuzz run openai_sse -- -max_total_time=120
         working-directory: fuzz
-      - run: cargo fuzz run anthropic_sse -- -max_total_time=120
+      - run: cargo +nightly fuzz run anthropic_sse -- -max_total_time=120
         working-directory: fuzz
       - name: Upload crash artifacts
         if: failure()
