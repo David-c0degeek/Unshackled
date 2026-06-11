@@ -8,6 +8,11 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Exposes doc-hidden entry points that drive the SSE decoders over arbitrary
+# bytes. Only the fuzz harness enables this; it adds no dependencies.
+fuzzing = []
+
 [dependencies]
 async-trait = { workspace = true }
 futures = { workspace = true }

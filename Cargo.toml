@@ -18,8 +18,9 @@ members = [
 ]
 # The LocalMind engine is vendored as a git submodule and consumed by
 # localpilot-localmind via path dependencies. It is its own workspace, so it is
-# excluded from this one.
-exclude = ["external/localmind"]
+# excluded from this one. The fuzz harness needs nightly + libFuzzer, so it is
+# its own workspace too and must not constrain the MSRV-pinned build.
+exclude = ["external/localmind", "fuzz"]
 resolver = "2"
 
 [workspace.package]

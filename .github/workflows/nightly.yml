@@ -1,4 +1,4 @@
-﻿name: nightly
+name: nightly
 
 # Post-alpha iteration pipeline: builds main on a schedule with no stability
 # guarantee (docs/09 Release Channels). Artifacts are retained briefly for
@@ -33,3 +33,28 @@ jobs:
             target/release/localpilot.exe
           if-no-files-found: ignore
           retention-days: 7
+
+  fuzz:
+    name: fuzz (SSE decoders)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # libFuzzer requires a nightly toolchain; the fuzz harness is its own
+      # workspace so this does not touch the MSRV-pinned build.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz run openai_sse -- -max_total_time=120
+        working-directory: fuzz
+      - run: cargo fuzz run anthropic_sse -- -max_total_time=120
+        working-directory: fuzz
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+          retention-days: 14

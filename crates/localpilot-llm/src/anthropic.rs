@@ -430,6 +430,25 @@ struct ToolAccum {
     input: String,
 }
 
+/// Drives the SSE decoder over arbitrary bytes for the fuzz harness: the
+/// input is split at a fuzzer-chosen point so chunk-boundary buffering is
+/// exercised, then finished, with every produced event consumed.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_sse_decoder(data: &[u8]) {
+    let mut out = EventQueue::new();
+    let mut decoder = SseDecoder::default();
+    let split = data
+        .first()
+        .map(|byte| usize::from(*byte) % data.len().max(1))
+        .unwrap_or(0);
+    let (head, tail) = data.split_at(split.min(data.len()));
+    decoder.push(head, &mut out);
+    decoder.push(tail, &mut out);
+    decoder.finish(&mut out);
+    out.clear();
+}
+
 impl SseDecoder {
     fn push(&mut self, bytes: &[u8], out: &mut EventQueue) {
         // Buffer raw bytes; only complete lines are decoded. A multi-byte

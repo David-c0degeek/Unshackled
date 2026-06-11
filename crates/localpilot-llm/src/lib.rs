@@ -34,6 +34,14 @@ pub use registry::ProviderRegistry;
 pub use request::{ModelRequest, ReasoningEffort, ToolSpec};
 pub use retry::{retry, RetryPolicy};
 
+/// Fuzzing entry points (enabled by the `fuzzing` feature; not public API).
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing {
+    pub use crate::anthropic::fuzz_sse_decoder as anthropic_sse;
+    pub use crate::openai::fuzz_sse_decoder as openai_sse;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

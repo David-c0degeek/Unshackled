@@ -33,10 +33,41 @@ jobs:
       - run: cargo nextest run --workspace
       - run: cargo test --doc --workspace
       - run: cargo check --workspace
+      # The vendored LocalMind engine is its own workspace; run its suite so a
+      # broken vendored test fails this build and the pinned commit's behavior
+      # stays verified on every OS.
+      - run: cargo nextest run --workspace --manifest-path external/localmind/Cargo.toml
+      - run: cargo test --doc --workspace --manifest-path external/localmind/Cargo.toml
       # The interactive TUI (`chat`) is behind an opt-in feature; lint and build
       # it here so the terminal driver is covered on every OS.
       - run: cargo clippy -p localpilot --features tui,learning --all-targets -- -D warnings
       - run: cargo build -p localpilot --features tui,learning
+
+  coverage:
+    name: coverage (line floor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.82"
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
+      # Line-coverage floor over the workspace. The floor is a ratchet: set
+      # from the measured baseline, raised deliberately, never lowered to
+      # admit a regression.
+      - run: cargo llvm-cov nextest --workspace --fail-under-lines 60
+      - run: cargo llvm-cov report --lcov --output-path coverage.lcov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage.lcov
+          retention-days: 14
 
   supply-chain:
     name: supply-chain (advisories, licenses, bans, unused deps)
