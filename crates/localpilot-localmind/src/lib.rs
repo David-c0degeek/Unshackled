@@ -22,8 +22,8 @@ pub use codegraph::{
 pub use ops::{
     audit, context_for, memory_delete, memory_disable_injection, memory_injection_enabled,
     memory_list, promote, review_decide, review_list, review_show, search, skill_body, skill_show,
-    skills_generate, skills_list, AuditEntry, MemorySummary, ReviewSummary, ReviewVerdict,
-    SearchHit, SkillDraftInfo,
+    skills_active, skills_generate, skills_list, ActiveSkillInfo, AuditEntry, MemorySummary,
+    ReviewSummary, ReviewVerdict, SearchHit, SkillDraftInfo,
 };
 
 use localmind_core::{SessionId as LearningSessionId, SessionSource};

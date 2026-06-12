@@ -1180,6 +1180,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "localmind-inference"
+version = "0.1.0"
+dependencies = [
+ "idna_adapter",
+ "localmind-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "localmind-mcp"
 version = "0.1.0"
 dependencies = [
@@ -1195,6 +1208,7 @@ name = "localmind-store"
 version = "0.1.0"
 dependencies = [
  "localmind-core",
+ "localmind-inference",
  "regex",
  "rusqlite",
  "serde",
@@ -2762,15 +2776,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "url"
-version = "2.5.8"
+name = "ureq"
+version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64",
+ "log",
+ "once_cell",
+ "url",
+]
+
+[[package]]
+name = "url"
+version = "2.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32f8b686cadd1473f4bd0117a5d28d36b1ade384ea9b5069a1c40aefed7fda60"
 dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
- "serde",
 ]
 
 [[package]]

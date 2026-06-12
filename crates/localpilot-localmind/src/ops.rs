@@ -288,6 +288,14 @@ pub struct SkillDraftInfo {
     pub path: String,
 }
 
+/// A host-consumable active skill.
+#[derive(Debug, Clone)]
+pub struct ActiveSkillInfo {
+    pub id: String,
+    pub name: String,
+    pub body_markdown: String,
+}
+
 fn draft_info(record: &SkillDraftRecord) -> SkillDraftInfo {
     SkillDraftInfo {
         id: record.draft.id.to_string(),
@@ -316,6 +324,23 @@ pub fn skills_list(project_root: &Path) -> Result<Vec<SkillDraftInfo>, LearningE
     let store = open_skills(project_root)?;
     let records = store.list().map_err(skill_err)?;
     Ok(records.iter().map(draft_info).collect())
+}
+
+/// List active LocalMind skills that LocalPilot may inject as host context.
+///
+/// # Errors
+/// Returns [`LearningError::Skill`] if the active skill store cannot be read.
+pub fn skills_active(project_root: &Path) -> Result<Vec<ActiveSkillInfo>, LearningError> {
+    let store = open_skills(project_root)?;
+    let records = store.active().map_err(skill_err)?;
+    Ok(records
+        .into_iter()
+        .map(|record| ActiveSkillInfo {
+            id: record.skill.id.to_string(),
+            name: record.skill.name,
+            body_markdown: record.skill.body_markdown,
+        })
+        .collect())
 }
 
 /// Inspect a single skill draft.
