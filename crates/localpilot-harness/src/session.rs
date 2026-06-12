@@ -863,8 +863,8 @@ impl SessionRuntime {
 
             // Assemble and persist the assistant message.
             let mut content = Vec::new();
-            let reasoning = trim_leading_blank_lines(reasoning);
-            let text = trim_leading_blank_lines(text);
+            let reasoning = trim_blank_boundary_lines(reasoning);
+            let text = trim_blank_boundary_lines(text);
 
             if !reasoning.trim().is_empty() {
                 content.push(ContentBlock::Reasoning {
@@ -998,29 +998,33 @@ impl SessionRuntime {
 
                 // Track per-tool failure counts for the safeguard.
                 if result.is_error {
-                    let count = self.tool_failure_guard.record_failure(&name);
-                    if count == DEFAULT_TOOL_FAILURE_THRESHOLD {
-                        let msg = format!(
-                            "tool `{name}` has failed {count} times this turn; stopping further \
-                             calls and trying another approach"
-                        );
-                        let _ = events.send(RuntimeEvent::Warning(msg.clone()));
-                        let _ = events.send(RuntimeEvent::ToolStuck {
-                            name: name.clone(),
-                            count,
-                        });
-                    } else if count > DEFAULT_TOOL_FAILURE_THRESHOLD {
-                        let _ = events.send(RuntimeEvent::Warning(format!(
-                            "tool `{name}` failed again (#{count}); still stuck"
-                        )));
-                    } else {
-                        let _ = events.send(RuntimeEvent::Warning(format!(
-                            "tool `{name}` failed ({}/{})",
-                            count, DEFAULT_TOOL_FAILURE_THRESHOLD
-                        )));
+                    let count = self.tool_failure_guard.record_failure(name);
+                    match count.cmp(&DEFAULT_TOOL_FAILURE_THRESHOLD) {
+                        std::cmp::Ordering::Less => {
+                            let _ = events.send(RuntimeEvent::Warning(format!(
+                                "tool `{name}` failed ({}/{})",
+                                count, DEFAULT_TOOL_FAILURE_THRESHOLD
+                            )));
+                        }
+                        std::cmp::Ordering::Equal => {
+                            let msg = format!(
+                                "tool `{name}` has failed {count} times this turn; stopping further \
+                                 calls and trying another approach"
+                            );
+                            let _ = events.send(RuntimeEvent::Warning(msg.clone()));
+                            let _ = events.send(RuntimeEvent::ToolStuck {
+                                name: name.clone(),
+                                count,
+                            });
+                        }
+                        std::cmp::Ordering::Greater => {
+                            let _ = events.send(RuntimeEvent::Warning(format!(
+                                "tool `{name}` failed again (#{count}); still stuck"
+                            )));
+                        }
                     }
                 } else {
-                    self.tool_failure_guard.record_success(&name);
+                    self.tool_failure_guard.record_success(name);
                 }
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
@@ -1080,10 +1084,10 @@ fn tool_error_message(id: &str, output: &str) -> Message {
     )
 }
 
-fn trim_leading_blank_lines(mut text: String) -> String {
-    let trimmed = text.trim_start_matches(['\r', '\n']);
+fn trim_blank_boundary_lines(mut text: String) -> String {
+    let trimmed = text.trim_matches(['\r', '\n']);
     if trimmed.len() != text.len() {
-        text.drain(..text.len() - trimmed.len());
+        text = trimmed.to_string();
     }
     text
 }
@@ -1191,6 +1195,14 @@ mod tests {
         assert_eq!(effective_context_limit(None, 24_000), 24_000);
         // A tiny window never collapses below the reserve floor.
         assert_eq!(effective_context_limit(Some(1_024), 24_000), 4_096);
+    }
+
+    #[test]
+    fn assistant_text_trims_blank_boundary_lines() {
+        assert_eq!(
+            trim_blank_boundary_lines("\r\n\nThe answer\n\n".to_string()),
+            "The answer"
+        );
     }
 
     #[test]

@@ -510,11 +510,15 @@ impl AppState {
             }
             UiEvent::TurnComplete => {
                 if !self.streaming.is_empty() {
-                    let text = std::mem::take(&mut self.streaming);
-                    self.transcript.push(TranscriptLine {
-                        speaker: "assistant".to_string(),
-                        text,
-                    });
+                    let text = std::mem::take(&mut self.streaming)
+                        .trim_end_matches(['\r', '\n'])
+                        .to_string();
+                    if !text.is_empty() {
+                        self.transcript.push(TranscriptLine {
+                            speaker: "assistant".to_string(),
+                            text,
+                        });
+                    }
                 }
             }
             UiEvent::UserMessage(text) => self.transcript.push(TranscriptLine {
@@ -710,6 +714,16 @@ mod tests {
     fn leading_blank_streaming_lines_are_dropped() {
         let mut state = state();
         state.apply(UiEvent::TextDelta("\n\nThe answer".to_string()));
+        state.apply(UiEvent::TurnComplete);
+
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "The answer");
+    }
+
+    #[test]
+    fn trailing_blank_streaming_lines_are_dropped_on_completion() {
+        let mut state = state();
+        state.apply(UiEvent::TextDelta("The answer\n\n".to_string()));
         state.apply(UiEvent::TurnComplete);
 
         assert_eq!(state.transcript.len(), 1);
