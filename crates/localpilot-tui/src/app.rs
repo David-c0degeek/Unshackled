@@ -64,12 +64,34 @@ pub enum SlashAction {
     LoadSession(String),
     Resume,
     WaitResume,
+    Ingest(IngestAction),
+    Knowledge(String),
+    ContextBuild(String),
     Quit,
     Invalid {
         command: String,
         reason: String,
     },
     Unknown(String),
+}
+
+/// Parsed ingestion slash subcommands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IngestAction {
+    Run,
+    Preview,
+    Status,
+    Pause,
+    Resume,
+    Cancel,
+    Refresh,
+    Rebuild,
+    Skipped,
+    Include(String),
+    Exclude(String),
+    Forget(String),
+    Review,
+    Promote(String),
 }
 
 /// Parse a slash command from an input line.
@@ -115,6 +137,13 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
         _ if matches!(name, "wait-resume" | "wait_resume") && args.is_empty() => {
             SlashAction::WaitResume
         }
+        _ if name == "ingest" => parse_ingest(args),
+        _ if name == "knowledge" && !args.is_empty() => SlashAction::Knowledge(args.to_string()),
+        _ if name == "knowledge" => SlashAction::Invalid {
+            command: "knowledge".to_string(),
+            reason: "usage: /knowledge <query>".to_string(),
+        },
+        _ if name == "context" => parse_context(args),
         _ if matches!(name, "quit" | "q") && args.is_empty() => SlashAction::Quit,
         _ if matches!(
             name,
@@ -141,6 +170,56 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
         }
         _ => SlashAction::Unknown(command.to_string()),
     })
+}
+
+fn parse_ingest(args: &str) -> SlashAction {
+    if args.is_empty() {
+        return SlashAction::Ingest(IngestAction::Run);
+    }
+    let (subcommand, rest) = args
+        .split_once(char::is_whitespace)
+        .map_or((args, ""), |(name, rest)| (name, rest.trim()));
+    match subcommand {
+        "preview" if rest.is_empty() => SlashAction::Ingest(IngestAction::Preview),
+        "status" if rest.is_empty() => SlashAction::Ingest(IngestAction::Status),
+        "pause" if rest.is_empty() => SlashAction::Ingest(IngestAction::Pause),
+        "resume" if rest.is_empty() => SlashAction::Ingest(IngestAction::Resume),
+        "cancel" if rest.is_empty() => SlashAction::Ingest(IngestAction::Cancel),
+        "refresh" if rest.is_empty() => SlashAction::Ingest(IngestAction::Refresh),
+        "rebuild" if rest.is_empty() => SlashAction::Ingest(IngestAction::Rebuild),
+        "skipped" if rest.is_empty() => SlashAction::Ingest(IngestAction::Skipped),
+        "include" if !rest.is_empty() => {
+            SlashAction::Ingest(IngestAction::Include(rest.to_string()))
+        }
+        "exclude" if !rest.is_empty() => {
+            SlashAction::Ingest(IngestAction::Exclude(rest.to_string()))
+        }
+        "forget" if !rest.is_empty() => {
+            SlashAction::Ingest(IngestAction::Forget(rest.to_string()))
+        }
+        "review" if rest.is_empty() => SlashAction::Ingest(IngestAction::Review),
+        "promote" if !rest.is_empty() => {
+            SlashAction::Ingest(IngestAction::Promote(rest.to_string()))
+        }
+        _ => SlashAction::Invalid {
+            command: "ingest".to_string(),
+            reason: "usage: /ingest [preview|status|pause|resume|cancel|refresh|rebuild|skipped|include <path>|exclude <path>|forget <path-or-id>|review|promote <id>]".to_string(),
+        },
+    }
+}
+
+fn parse_context(args: &str) -> SlashAction {
+    let (subcommand, rest) = args
+        .split_once(char::is_whitespace)
+        .map_or((args, ""), |(name, rest)| (name, rest.trim()));
+    if subcommand == "build" && !rest.is_empty() {
+        SlashAction::ContextBuild(rest.to_string())
+    } else {
+        SlashAction::Invalid {
+            command: "context".to_string(),
+            reason: "usage: /context build <task>".to_string(),
+        }
+    }
 }
 
 /// Apply one input to the state.
@@ -263,6 +342,15 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
         )),
         SlashAction::WaitResume => state.apply(UiEvent::Notice(
             "/wait-resume is handled by the interactive host".to_string(),
+        )),
+        SlashAction::Ingest(_) => state.apply(UiEvent::Notice(
+            "/ingest is handled by the interactive host".to_string(),
+        )),
+        SlashAction::Knowledge(_) => state.apply(UiEvent::Notice(
+            "/knowledge is handled by the interactive host".to_string(),
+        )),
+        SlashAction::ContextBuild(_) => state.apply(UiEvent::Notice(
+            "/context is handled by the interactive host".to_string(),
         )),
         SlashAction::Quit => state.should_quit = true,
         SlashAction::Invalid { command, reason } => {
@@ -452,5 +540,41 @@ mod tests {
 
         handle_key(&mut state, Key::ScrollDown);
         assert_eq!(state.transcript_scroll, 0);
+    }
+
+    #[test]
+    fn ingest_slash_commands_are_parsed() {
+        assert_eq!(
+            parse_slash("/ingest"),
+            Some(SlashAction::Ingest(IngestAction::Run))
+        );
+        assert_eq!(
+            parse_slash("/ingest preview"),
+            Some(SlashAction::Ingest(IngestAction::Preview))
+        );
+        assert_eq!(
+            parse_slash("/ingest include src/lib.rs"),
+            Some(SlashAction::Ingest(IngestAction::Include(
+                "src/lib.rs".to_string()
+            )))
+        );
+        assert_eq!(
+            parse_slash("/ingest promote item-1"),
+            Some(SlashAction::Ingest(IngestAction::Promote(
+                "item-1".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn knowledge_and_context_slash_commands_are_parsed() {
+        assert_eq!(
+            parse_slash("/knowledge parser"),
+            Some(SlashAction::Knowledge("parser".to_string()))
+        );
+        assert_eq!(
+            parse_slash("/context build fix parser"),
+            Some(SlashAction::ContextBuild("fix parser".to_string()))
+        );
     }
 }
