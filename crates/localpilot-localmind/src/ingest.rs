@@ -1195,6 +1195,101 @@ mod tests {
     }
 
     #[test]
+    fn preview_classifies_binary_decode_and_size_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("binary.dat"), b"abc\0def").unwrap();
+        fs::write(dir.path().join("bad.txt"), [0xff, 0xfe, 0xfd]).unwrap();
+        fs::write(dir.path().join("large.md"), "x".repeat(32)).unwrap();
+        let cfg = IngestConfig {
+            enabled: true,
+            include: vec!["binary.dat".to_string()],
+            max_file_bytes: 8,
+            max_run_bytes: 1024,
+            max_files: 100,
+            max_tokens: 100,
+            max_elapsed_secs: 60,
+            ..IngestConfig::default()
+        };
+
+        let manifest = preview(dir.path(), &cfg).unwrap();
+
+        let binary = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.path == "binary.dat")
+            .unwrap();
+        assert_eq!(binary.status, CandidateStatus::Binary);
+        let bad = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.path == "bad.txt")
+            .unwrap();
+        assert_eq!(bad.status, CandidateStatus::DecodeFailed);
+        let large = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.path == "large.md")
+            .unwrap();
+        assert_eq!(large.status, CandidateStatus::TooLarge);
+    }
+
+    #[test]
+    fn preview_honors_gitignore_and_include_override() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("target")).unwrap();
+        fs::write(dir.path().join(".gitignore"), "ignored.md\n").unwrap();
+        fs::write(dir.path().join("ignored.md"), "ignored").unwrap();
+        fs::write(dir.path().join("target").join("keep.md"), "keep").unwrap();
+        let mut cfg = config();
+        cfg.include = vec!["target/keep.md".to_string()];
+
+        let manifest = preview(dir.path(), &cfg).unwrap();
+
+        assert!(manifest
+            .entries
+            .iter()
+            .all(|entry| entry.path != "ignored.md"));
+        let keep = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.path == "target/keep.md")
+            .unwrap();
+        assert_eq!(keep.status, CandidateStatus::Candidate);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn preview_does_not_follow_symlinked_files_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("real.md"), "real").unwrap();
+        let link = dir.path().join("linked.md");
+        create_file_symlink(dir.path().join("real.md"), &link).unwrap();
+
+        let manifest = preview(dir.path(), &config()).unwrap();
+
+        assert!(manifest
+            .entries
+            .iter()
+            .all(|entry| entry.path != "linked.md"));
+    }
+
+    #[cfg(unix)]
+    fn create_file_symlink(
+        original: impl AsRef<Path>,
+        link: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(
+        original: impl AsRef<Path>,
+        link: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(original, link)
+    }
+
+    #[test]
     fn run_redacts_before_persisting_chunks_and_rebuild_keeps_memory() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("README.md"), "token = abcdefghijklmnop\n").unwrap();
