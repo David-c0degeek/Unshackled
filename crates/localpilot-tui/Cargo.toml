@@ -14,6 +14,9 @@ workspace = true
 # widget live in the CLI's terminal driver, keeping this crate's tests free of
 # the terminal-init code that crashes the harness on some local toolchains.
 ratatui = { workspace = true, default-features = false }
+# The transcript is a scrollable view with its own scrollbar; backend-agnostic,
+# so it does not pull crossterm into this testable UI crate.
+tui-scrollview = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

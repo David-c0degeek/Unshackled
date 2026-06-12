@@ -320,9 +320,10 @@ fn transcript_follows_the_latest_response_rows() {
         .join("\n");
     let rendered = render_string(&state, 60, 12);
 
+    // Following the bottom shows the latest rows; the earliest scroll off the
+    // top. The scroll view's scrollbar replaces the old textual position label.
     assert!(rendered.contains("response line 20"));
     assert!(!rendered.contains("response line 1 "));
-    assert!(rendered.contains("[* bottom]"));
 }
 
 #[test]
@@ -336,11 +337,15 @@ fn transcript_page_keys_scroll_the_output_viewport() {
 
     handle_input(&mut state, AppInput::Key(Key::PageUp));
     let scrolled = render_string(&state, 60, 12);
+    // Paging up scrolls earlier rows into the viewport and pushes the latest
+    // line out of view. The scroll view's scrollbar replaces the old position
+    // label, so the assertion is on the visible content rather than that label.
     assert!(!scrolled.contains("response line 20"));
-    assert!(scrolled.contains("[* 50%]"));
+    assert!(scrolled.contains("response line 10 "));
 
     handle_input(&mut state, AppInput::Key(Key::PageDown));
     let bottom = render_string(&state, 60, 12);
+    // Paging back down returns to following the latest output.
     assert!(bottom.contains("response line 20"));
-    assert!(bottom.contains("[* bottom]"));
+    assert!(!bottom.contains("response line 10 "));
 }

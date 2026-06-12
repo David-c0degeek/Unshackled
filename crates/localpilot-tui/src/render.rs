@@ -2,11 +2,12 @@
 //! pure with respect to the state, so it snapshot-tests cleanly with a
 //! `TestBackend`.
 
-use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
+use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
 use crate::state::{AppState, ApprovalRequest, Picker, Profile, TrustPrompt};
 
@@ -15,6 +16,15 @@ const NARROW_WIDTH: u16 = 80;
 
 /// Most text rows the input box grows to before it starts scrolling.
 const MAX_INPUT_TEXT_ROWS: u16 = 10;
+
+/// A rounded-border block whose title is padded on the left with a space so the
+/// label does not butt against the corner. Centralizing the border style keeps
+/// every panel (and the modals) visually consistent.
+fn panel(title: impl AsRef<str>) -> Block<'static> {
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(format!(" {}", title.as_ref()))
+}
 
 /// Draw the entire UI for the current state.
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -83,16 +93,13 @@ fn input_box_height(state: &AppState, area: Rect) -> u16 {
 fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
     let h = &state.header;
     let mut text = format!(
-        "LocalPilot v{} | {}/{} | ws:{} | session:{}",
+        "LocalPilot {} | {}/{} | ws:{} | session:{}",
         h.version, h.provider, h.model, h.workspace, h.session_id
     );
     if let Some(update) = &h.update {
         text.push_str(&format!("  ·  update available: {update}"));
     }
-    frame.render_widget(
-        Paragraph::new(text).block(Block::bordered().title("LocalPilot")),
-        area,
-    );
+    frame.render_widget(Paragraph::new(text).block(panel("LocalPilot")), area);
 }
 
 fn render_body(frame: &mut Frame, area: Rect, state: &AppState, narrow: bool) {
@@ -134,10 +141,7 @@ fn render_plan(frame: &mut Frame, area: Rect, state: &AppState) {
         .collect();
     let done = state.plan.iter().filter(|i| i.status == "done").count();
     let title = format!("plan ({done}/{})", state.plan.len());
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).block(Block::bordered().title(title)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Text::from(lines)).block(panel(title)), area);
 }
 
 /// Color used for a given speaker in the transcript.
@@ -204,68 +208,59 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &AppState) {
             }
         }
     }
-    let inner_width = area.width.saturating_sub(2).max(1);
+    let block = panel(transcript_title(state));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Reserve one column for the vertical scrollbar so the text width — and thus
+    // the wrapping — stays stable whether or not the content is scrollable.
+    let content_width = inner.width.saturating_sub(1).max(1);
+    let text = Text::from(lines);
     // Count rows with ratatui's own word-wrapping (via `line_count`) so the
-    // scroll bounds match what the renderer actually draws. A character-based
-    // estimate diverges from `WordWrapper` and leaves the last rows unreachable.
-    // The measuring paragraph carries no block, so the returned count is the
-    // wrapped text rows alone (no border rows added).
-    let total_rows = Paragraph::new(Text::from(lines.clone()))
+    // buffer is tall enough to hold every wrapped row and the bottom anchor lands
+    // on the final line. A character-based estimate diverges from `WordWrapper`.
+    let total_rows = (Paragraph::new(text.clone())
         .wrap(Wrap { trim: false })
-        .line_count(inner_width);
-    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
-    let max_scroll = total_rows.saturating_sub(visible_rows);
+        .line_count(content_width) as u16)
+        .max(1);
+
+    let mut scroll_view = ScrollView::new(Size::new(content_width, total_rows))
+        .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
+    scroll_view.render_widget(
+        Paragraph::new(text).wrap(Wrap { trim: false }),
+        Rect::new(0, 0, content_width, total_rows),
+    );
+
+    // `transcript_scroll` counts rows held back from the bottom (0 follows the
+    // latest output); the scroll view offsets from the top, so translate.
+    let visible_rows = inner.height as usize;
+    let max_scroll = (total_rows as usize).saturating_sub(visible_rows);
     let scroll_back = state.transcript_scroll.min(max_scroll);
-    let scroll_rows = max_scroll.saturating_sub(scroll_back);
-    let title = transcript_title(state, total_rows, visible_rows, scroll_rows, max_scroll);
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(Block::bordered().title(title))
-        .wrap(Wrap { trim: false });
-    // `scroll_rows` is always in range (0..=max_scroll). At the bottom it is
-    // exactly `max_scroll`, so the last `visible_rows` wrapped rows — including
-    // the final line — are shown. ratatui does not clamp the scroll offset, so
-    // an out-of-range value would clip or panic; we never pass one.
-    let scroll = u16::try_from(scroll_rows).unwrap_or(u16::MAX);
-    frame.render_widget(paragraph.scroll((scroll, 0)), area);
+    let offset_y = u16::try_from(max_scroll - scroll_back).unwrap_or(u16::MAX);
+    let mut sv_state = ScrollViewState::with_offset(Position::new(0, offset_y));
+    frame.render_stateful_widget(scroll_view, inner, &mut sv_state);
 }
 
-fn transcript_title(
-    state: &AppState,
-    total_rows: usize,
-    visible_rows: usize,
-    scroll_rows: usize,
-    max_scroll: usize,
-) -> String {
-    let mut title = match &state.search {
+/// The transcript label, carrying the active search query when one is set. The
+/// scroll position is shown by the scroll view's own scrollbar.
+fn transcript_title(state: &AppState) -> String {
+    match &state.search {
         Some(q) if !q.is_empty() => format!("transcript [search: {q}]"),
         _ => "transcript".to_string(),
-    };
-    if total_rows > visible_rows {
-        let position = if scroll_rows == 0 {
-            "top".to_string()
-        } else if scroll_rows >= max_scroll {
-            "bottom".to_string()
-        } else {
-            let bottom_row = scroll_rows.saturating_add(visible_rows).min(total_rows);
-            let percent = (bottom_row * 100).div_ceil(total_rows);
-            format!("{percent}%")
-        };
-        title.push_str(&format!(" [* {position}]"));
     }
-    title
 }
 
 fn render_thinking(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(
         Paragraph::new(state.thinking.text.clone())
-            .block(Block::bordered().title("thinking"))
+            .block(panel("thinking"))
             .style(Style::default().fg(Color::DarkGray))
             .wrap(Wrap { trim: false }),
         area,
     );
 }
 
-const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
+const SPINNER: [char; 4] = ['◐', '◓', '◑', '◒'];
 
 fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
     let title = if state.busy {
@@ -283,7 +278,7 @@ fn render_input(frame: &mut Frame, area: Rect, state: &AppState) {
     let scroll = cursor_row.saturating_add(1).saturating_sub(visible_rows);
     frame.render_widget(
         Paragraph::new(state.input.clone())
-            .block(Block::bordered().title(title))
+            .block(panel(title))
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         area,
@@ -336,7 +331,7 @@ fn render_trust(frame: &mut Frame, area: Rect, trust: &TrustPrompt) {
     ]);
     frame.render_widget(
         Paragraph::new(text)
-            .block(Block::bordered().title("trust this folder?"))
+            .block(panel("trust this folder?"))
             .wrap(Wrap { trim: false }),
         popup,
     );
@@ -397,10 +392,7 @@ fn render_approval(frame: &mut Frame, area: Rect, approval: &ApprovalRequest, st
         Line::raw(""),
         Line::raw("[y] approve   [n] deny"),
     ]);
-    frame.render_widget(
-        Paragraph::new(text).block(Block::bordered().title("approve tool?")),
-        popup,
-    );
+    frame.render_widget(Paragraph::new(text).block(panel("approve tool?")), popup);
 }
 
 fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
@@ -415,10 +407,7 @@ fn render_picker(frame: &mut Frame, area: Rect, picker: &Picker) {
             ListItem::new(format!("{marker}{opt}"))
         })
         .collect();
-    frame.render_widget(
-        List::new(items).block(Block::bordered().title(picker.title.clone())),
-        popup,
-    );
+    frame.render_widget(List::new(items).block(panel(&picker.title)), popup);
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

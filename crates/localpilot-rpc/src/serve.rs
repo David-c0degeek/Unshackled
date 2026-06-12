@@ -413,6 +413,7 @@ fn map_event(event: RuntimeEvent) -> ServerEvent {
         RuntimeEvent::Stopped(reason) => ServerEvent::Stopped {
             reason: stop_reason_label(reason).to_string(),
         },
+        RuntimeEvent::ToolStuck { name, count } => ServerEvent::ToolStuck { name, count },
     }
 }
 

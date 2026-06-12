@@ -151,6 +151,11 @@ pub enum ServerEvent {
     },
     /// The agent is closing the connection.
     Closed,
+    /// A tool has failed repeatedly; the agent is switching strategy.
+    ToolStuck {
+        name: String,
+        count: u32,
+    },
 }
 
 /// One plan step on the wire.

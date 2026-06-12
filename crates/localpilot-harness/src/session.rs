@@ -1,8 +1,9 @@
 //! The agent-mode session runtime: the conversational loop both operating modes
 //! share. It streams provider events, routes tool calls through the permission
-//! engine, persists the transcript, and supports cancellation, loop limits, and
-//! context compaction.
+//! engine, persists the transcript, and supports cancellation, recovery
+//! safeguards, and context compaction.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -71,6 +72,9 @@ pub enum RuntimeEvent {
     QuotaPaused { reset: String },
     /// A recovery event occurred; model health is attached.
     Recovery { health: ModelHealth },
+    /// A tool has failed repeatedly (≥ 6 times in this turn). The safeguard
+    /// stops issuing that tool and notifies the user.
+    ToolStuck { name: String, count: u32 },
     /// The loop stopped.
     Stopped(StopReason),
 }
@@ -173,6 +177,43 @@ impl SteerQueue {
 const REPAIR_PROMPT: &str =
     "Your previous response was unusable. Stop, and produce a clean, well-formed reply.";
 
+/// Default threshold at which a tool is considered stuck and the safeguard
+/// intervenes.
+const DEFAULT_TOOL_FAILURE_THRESHOLD: u32 = 6;
+
+/// Tracks per-tool failure counts within a single turn. Resets at every turn
+/// boundary so that failures from previous turns don't accumulate.
+#[derive(Debug, Default)]
+struct ToolFailureGuard {
+    /// Maps tool name → failure count for this turn.
+    failures: HashMap<String, u32>,
+}
+
+impl ToolFailureGuard {
+    /// Record a failure for `tool_name` and return the new count.
+    fn record_failure(&mut self, tool_name: &str) -> u32 {
+        let count = self.failures.entry(tool_name.to_string()).or_insert(0);
+        *count += 1;
+        *count
+    }
+
+    /// Reset counters for a successful (non-error) tool invocation.
+    fn record_success(&mut self, tool_name: &str) {
+        self.failures.remove(tool_name);
+    }
+
+    /// Whether `tool_name` has exceeded the threshold.
+    #[allow(dead_code)] // kept for potential future use (e.g., pre-check before dispatch)
+    fn is_stuck(&self, tool_name: &str, threshold: u32) -> bool {
+        self.failures.get(tool_name).copied().unwrap_or(0) >= threshold
+    }
+
+    /// Reset all counters (call at the start of each turn).
+    fn reset(&mut self) {
+        self.failures.clear();
+    }
+}
+
 /// The agent-mode runtime.
 pub struct SessionRuntime {
     provider: Arc<dyn ModelProvider>,
@@ -199,6 +240,8 @@ pub struct SessionRuntime {
     steer: SteerQueue,
     /// Registered lifecycle observers, context hooks, and tool gates.
     hooks: HookFabric,
+    /// Per-tool failure counts within the current turn.
+    tool_failure_guard: ToolFailureGuard,
 }
 
 impl SessionRuntime {
@@ -240,6 +283,7 @@ impl SessionRuntime {
             compaction_cache: None,
             steer: SteerQueue::default(),
             hooks: HookFabric::default(),
+            tool_failure_guard: ToolFailureGuard::default(),
         };
         runtime.record_event(SessionEventKind::SessionOpened {
             reason: OpenReason::New,
@@ -638,6 +682,7 @@ impl SessionRuntime {
         }
         self.append(Message::text(Role::User, user_input));
         self.last_quota = None;
+        self.tool_failure_guard.reset();
         let mut tools_enabled = true;
 
         loop {
@@ -866,6 +911,22 @@ impl SessionRuntime {
                 return self.stop(events, StopReason::Done);
             }
 
+            if let Some(message) = invalid_tool_calls(&calls) {
+                let _ = events.send(RuntimeEvent::Warning(message.clone()));
+                let diagnostic = self
+                    .recovery
+                    .record_bad_turn(localpilot_recovery::BadOutputKind::MalformedToolCall);
+                self.persist_recovery(&diagnostic);
+                let _ = events.send(RuntimeEvent::Recovery {
+                    health: self.recovery.health(),
+                });
+                if self.recovery.health() == ModelHealth::Degraded {
+                    return self.stop(events, StopReason::Degraded);
+                }
+                self.messages.push(Message::text(Role::User, message));
+                continue;
+            }
+
             // Execute tool calls through the permission-gated registry.
             for (id, name, input) in &calls {
                 // Surface the task plan to the UI as the model updates it.
@@ -934,6 +995,33 @@ impl SessionRuntime {
                     ));
                     return self.stop(events, StopReason::Cancelled);
                 };
+
+                // Track per-tool failure counts for the safeguard.
+                if result.is_error {
+                    let count = self.tool_failure_guard.record_failure(&name);
+                    if count == DEFAULT_TOOL_FAILURE_THRESHOLD {
+                        let msg = format!(
+                            "tool `{name}` has failed {count} times this turn; stopping further \
+                             calls and trying another approach"
+                        );
+                        let _ = events.send(RuntimeEvent::Warning(msg.clone()));
+                        let _ = events.send(RuntimeEvent::ToolStuck {
+                            name: name.clone(),
+                            count,
+                        });
+                    } else if count > DEFAULT_TOOL_FAILURE_THRESHOLD {
+                        let _ = events.send(RuntimeEvent::Warning(format!(
+                            "tool `{name}` failed again (#{count}); still stuck"
+                        )));
+                    } else {
+                        let _ = events.send(RuntimeEvent::Warning(format!(
+                            "tool `{name}` failed ({}/{})",
+                            count, DEFAULT_TOOL_FAILURE_THRESHOLD
+                        )));
+                    }
+                } else {
+                    self.tool_failure_guard.record_success(&name);
+                }
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
                     name: name.clone(),
@@ -1093,6 +1181,7 @@ fn quota_reset_label(quota: &QuotaInfo) -> String {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -1102,5 +1191,61 @@ mod tests {
         assert_eq!(effective_context_limit(None, 24_000), 24_000);
         // A tiny window never collapses below the reserve floor.
         assert_eq!(effective_context_limit(Some(1_024), 24_000), 4_096);
+    }
+
+    #[test]
+    fn tool_failure_guard_tracks_failures_per_tool() {
+        let mut guard = ToolFailureGuard::default();
+        assert_eq!(guard.record_failure("read_file"), 1);
+        assert_eq!(guard.record_failure("read_file"), 2);
+        assert_eq!(guard.record_failure("write_file"), 1);
+    }
+
+    #[test]
+    fn tool_failure_guard_reaches_threshold_at_six() {
+        let mut guard = ToolFailureGuard::default();
+        for i in 1..=5 {
+            assert_eq!(guard.record_failure("run_shell"), i);
+        }
+        // Sixth failure crosses the threshold.
+        assert_eq!(guard.record_failure("run_shell"), 6);
+    }
+
+    #[test]
+    fn tool_failure_guard_clears_on_success() {
+        let mut guard = ToolFailureGuard::default();
+        guard.record_failure("edit_file");
+        guard.record_failure("edit_file");
+        guard.record_success("edit_file");
+        // After success the counter is gone.
+        assert!(!guard.is_stuck("edit_file", 6));
+    }
+
+    #[test]
+    fn tool_failure_guard_resets_across_turns() {
+        let mut guard = ToolFailureGuard::default();
+        for _ in 0..6 {
+            guard.record_failure("find_files");
+        }
+        assert!(guard.is_stuck("find_files", 6));
+
+        // Simulate a new turn boundary.
+        guard.reset();
+        assert!(!guard.is_stuck("find_files", 6));
+    }
+
+    #[test]
+    fn tool_failure_guard_independent_per_tool() {
+        let mut guard = ToolFailureGuard::default();
+        for _ in 0..5 {
+            guard.record_failure("tool_a");
+        }
+        // tool_a is at 5, not yet stuck.
+        assert!(!guard.is_stuck("tool_a", 6));
+        // tool_b hasn't failed at all.
+        assert!(!guard.is_stuck("tool_b", 6));
+
+        guard.record_failure("tool_b");
+        assert_eq!(guard.record_failure("tool_b"), 2);
     }
 }
