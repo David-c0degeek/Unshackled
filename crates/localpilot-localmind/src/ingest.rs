@@ -1337,6 +1337,84 @@ mod tests {
     }
 
     #[test]
+    fn refresh_reuses_unchanged_chunks_and_updates_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("README.md"), "alpha\n").unwrap();
+        fs::write(dir.path().join("notes.txt"), "stable\n").unwrap();
+        run(dir.path(), &config(), RunMode::Full).unwrap();
+        let first =
+            read_json::<Vec<ChunkRecord>>(&dir.path().join(INGEST_DIR).join(CHUNKS_FILE)).unwrap();
+        let stable_hash = first
+            .iter()
+            .find(|chunk| chunk.path == "notes.txt")
+            .unwrap()
+            .content_hash
+            .clone();
+
+        fs::write(dir.path().join("README.md"), "beta\n").unwrap();
+        let summary = run(dir.path(), &config(), RunMode::Refresh).unwrap();
+        let refreshed =
+            read_json::<Vec<ChunkRecord>>(&dir.path().join(INGEST_DIR).join(CHUNKS_FILE)).unwrap();
+
+        assert_eq!(summary.job.status, JobStatus::Completed);
+        assert!(refreshed
+            .iter()
+            .any(|chunk| chunk.path == "notes.txt" && chunk.content_hash == stable_hash));
+        assert!(refreshed
+            .iter()
+            .any(|chunk| chunk.path == "README.md" && chunk.text.contains("beta")));
+    }
+
+    #[test]
+    fn pause_resume_and_cancel_update_persistent_job_state() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("README.md"), "content\n").unwrap();
+        run(dir.path(), &config(), RunMode::Full).unwrap();
+
+        assert_eq!(
+            pause(dir.path()).unwrap().unwrap().status,
+            JobStatus::Paused
+        );
+        assert_eq!(
+            resume(dir.path()).unwrap().unwrap().status,
+            JobStatus::Queued
+        );
+        assert_eq!(
+            cancel(dir.path()).unwrap().unwrap().status,
+            JobStatus::Cancelled
+        );
+        assert_eq!(
+            status(dir.path()).unwrap().unwrap().status,
+            JobStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn run_budgets_are_explicit_and_testable() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("one.md"), "one").unwrap();
+        fs::write(dir.path().join("two.md"), "two").unwrap();
+        let cfg = IngestConfig {
+            enabled: true,
+            max_files: 1,
+            max_run_bytes: 1024,
+            max_tokens: 1024,
+            max_file_bytes: 1024,
+            max_elapsed_secs: 60,
+            ..IngestConfig::default()
+        };
+
+        let manifest = preview(dir.path(), &cfg).unwrap();
+
+        assert_eq!(manifest.estimates.candidate_files, 1);
+        assert_eq!(manifest.estimates.skipped_files, 1);
+        assert!(manifest
+            .entries
+            .iter()
+            .any(|entry| entry.status == CandidateStatus::OverBudget));
+    }
+
+    #[test]
     fn promote_enqueues_review_without_accepted_memory() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("README.md"), "project convention\n").unwrap();
