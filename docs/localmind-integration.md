@@ -115,3 +115,19 @@ localpilot memory export graph.json
 
 New rich-learning behavior lands in LocalMind, not by expanding host-local memory
 implementations.
+
+## Folder Ingestion Roadmap Boundaries
+
+The first ingestion implementation handles safe UTF-8 text-like files,
+deterministic manifests, redacted chunks, lexical search, review candidates, and
+task packs. These are local derived artifacts and can be rebuilt.
+
+The following remain staged behind explicit user approval and review:
+
+- rich extractors for PDF, DOCX, XLSX, images/OCR, archives, notebooks, and
+  language-aware graph expansion beyond the current code graph;
+- model-backed file, folder, and project summaries beyond deterministic review
+  shells;
+- external research/update flows. External facts must carry source citations,
+  expiry/staleness metadata, and a review item before they can influence
+  accepted memory.

@@ -988,6 +988,29 @@ fn build_review_items(manifest: &PreviewManifest, chunks: &[ChunkRecord]) -> Vec
             stale: false,
         });
     }
+    if let Some(tooling) = tooling_review_item(manifest) {
+        items.push(tooling);
+    }
+    if manifest.estimates.candidate_files >= 3 {
+        items.push(IngestReviewItem {
+            id: format!("skill-{}", fnv_hash_hex(manifest.project_root.as_bytes())),
+            kind: "skill".to_string(),
+            title: "Review project workflow skill suggestion".to_string(),
+            body: "Ingestion found enough local project material to justify reviewing a project workflow skill draft. No skill is installed or activated automatically.".to_string(),
+            source_path: None,
+            content_hash: Some(fnv_hash_hex(manifest.project_root.as_bytes())),
+            stale: false,
+        });
+    }
+    items.push(IngestReviewItem {
+        id: format!("research-{}", fnv_hash_hex(manifest.project_root.as_bytes())),
+        kind: "research".to_string(),
+        title: "External research requires explicit review".to_string(),
+        body: "No external facts were fetched during folder ingestion. Future research-backed updates must carry citations, expiry, and review before promotion.".to_string(),
+        source_path: None,
+        content_hash: Some(fnv_hash_hex(manifest.project_root.as_bytes())),
+        stale: false,
+    });
     for entry in manifest
         .entries
         .iter()
@@ -1014,6 +1037,45 @@ fn build_review_items(manifest: &PreviewManifest, chunks: &[ChunkRecord]) -> Vec
         });
     }
     items
+}
+
+fn tooling_review_item(manifest: &PreviewManifest) -> Option<IngestReviewItem> {
+    let tooling_files: Vec<&ManifestEntry> = manifest
+        .entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.path.as_str(),
+                "Cargo.toml"
+                    | "package.json"
+                    | "pyproject.toml"
+                    | "go.mod"
+                    | "pom.xml"
+                    | "build.gradle"
+                    | "Makefile"
+            ) || entry.path.ends_with(".sln")
+        })
+        .filter(|entry| entry.status == CandidateStatus::Candidate)
+        .collect();
+    if tooling_files.is_empty() {
+        return None;
+    }
+    let labels = tooling_files
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(IngestReviewItem {
+        id: format!("tooling-{}", fnv_hash_hex(labels.as_bytes())),
+        kind: "tooling".to_string(),
+        title: "Review detected project tooling".to_string(),
+        body: redact::redact(&format!(
+            "Ingestion found tooling/config files that may contain build or test commands: {labels}."
+        )),
+        source_path: tooling_files.first().map(|entry| entry.path.clone()),
+        content_hash: Some(fnv_hash_hex(labels.as_bytes())),
+        stale: false,
+    })
 }
 
 fn find_chunk(ingest_dir: &Path, id: &str) -> Result<ChunkRecord, IngestError> {
@@ -1547,5 +1609,24 @@ mod tests {
         assert!(!dir.path().join(".localmind").join("memory").exists());
         let queue = crate::review_list(dir.path()).unwrap();
         assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn review_items_include_tooling_skill_and_research_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("README.md"), "guide\n").unwrap();
+        fs::write(dir.path().join("notes.txt"), "notes\n").unwrap();
+        run(dir.path(), &config(), RunMode::Full).unwrap();
+
+        let items = review_items(dir.path()).unwrap();
+
+        assert!(items.iter().any(|item| item.kind == "tooling"));
+        assert!(items.iter().any(|item| item.kind == "skill"));
+        assert!(items.iter().any(|item| item.kind == "research"));
     }
 }
