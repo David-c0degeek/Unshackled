@@ -26,8 +26,8 @@ use localpilot_sandbox::{
 };
 use localpilot_store::Store;
 use localpilot_tui::{
-    handle_input, parse_slash, render, AppInput, AppState, ApprovalRequest, Header, Key, Mode,
-    PlanItem, Profile as UiProfile, SlashAction, TrustPrompt, UiEvent,
+    handle_input, parse_slash, render, AppInput, AppState, ApprovalRequest, Header, IngestAction,
+    Key, Mode, PlanItem, Profile as UiProfile, SlashAction, TrustPrompt, UiEvent,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -423,6 +423,17 @@ async fn run_slash(
             state.apply(UiEvent::Notice("checking paused harness run".to_string()));
             run_harness_command(terminal, state, approval_rx, host, true).await?;
         }
+        SlashAction::Ingest(action) => run_ingest_slash(state, host.cwd, action)?,
+        SlashAction::Knowledge(query) => {
+            let mut output = Vec::new();
+            crate::ingest_cmd::knowledge_search(host.cwd, &query, &mut output)?;
+            apply_command_output(state, output);
+        }
+        SlashAction::ContextBuild(task) => {
+            let mut output = Vec::new();
+            crate::ingest_cmd::knowledge_pack(host.cwd, &task, &mut output)?;
+            apply_command_output(state, output);
+        }
         SlashAction::Quit => state.should_quit = true,
         SlashAction::Invalid { command, reason } => {
             state.apply(UiEvent::Notice(format!("invalid /{command}: {reason}")));
@@ -434,6 +445,59 @@ async fn run_slash(
         }
     }
     Ok(())
+}
+
+fn run_ingest_slash(
+    state: &mut AppState,
+    cwd: &std::path::Path,
+    action: IngestAction,
+) -> anyhow::Result<()> {
+    let mut output = Vec::new();
+    match action {
+        IngestAction::Run => {
+            crate::ingest_cmd::run(cwd, localpilot_localmind::RunMode::Full, &mut output)?;
+        }
+        IngestAction::Preview => crate::ingest_cmd::preview(cwd, &mut output)?,
+        IngestAction::Status => crate::ingest_cmd::status(cwd, &mut output)?,
+        IngestAction::Pause => {
+            crate::ingest_cmd::control(cwd, crate::ingest_cmd::ControlAction::Pause, &mut output)?
+        }
+        IngestAction::Resume => {
+            crate::ingest_cmd::control(cwd, crate::ingest_cmd::ControlAction::Resume, &mut output)?
+        }
+        IngestAction::Cancel => {
+            crate::ingest_cmd::control(cwd, crate::ingest_cmd::ControlAction::Cancel, &mut output)?
+        }
+        IngestAction::Refresh => {
+            crate::ingest_cmd::run(cwd, localpilot_localmind::RunMode::Refresh, &mut output)?;
+        }
+        IngestAction::Rebuild => crate::ingest_cmd::rebuild(cwd, &mut output)?,
+        IngestAction::Skipped => crate::ingest_cmd::skipped(cwd, &mut output)?,
+        IngestAction::Include(path) => crate::ingest_cmd::rule(
+            cwd,
+            crate::ingest_cmd::RuleAction::Include,
+            std::path::Path::new(&path),
+            &mut output,
+        )?,
+        IngestAction::Exclude(path) => crate::ingest_cmd::rule(
+            cwd,
+            crate::ingest_cmd::RuleAction::Exclude,
+            std::path::Path::new(&path),
+            &mut output,
+        )?,
+        IngestAction::Forget(target) => crate::ingest_cmd::forget(cwd, &target, &mut output)?,
+        IngestAction::Review => crate::ingest_cmd::review(cwd, &mut output)?,
+        IngestAction::Promote(id) => crate::ingest_cmd::promote(cwd, &id, &mut output)?,
+    }
+    apply_command_output(state, output);
+    Ok(())
+}
+
+fn apply_command_output(state: &mut AppState, output: Vec<u8>) {
+    let text = String::from_utf8_lossy(&output);
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        state.apply(UiEvent::Notice(line.to_string()));
+    }
 }
 
 async fn run_harness_command(

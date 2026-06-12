@@ -12,6 +12,7 @@ use localpilot_store::Store;
 mod context_inject;
 mod doctor;
 mod harness_cmd;
+mod ingest_cmd;
 #[cfg(feature = "tui")]
 mod key_input;
 mod learning_cmd;
@@ -71,6 +72,16 @@ enum Command {
     Learning {
         #[command(subcommand)]
         command: LearningCommand,
+    },
+    /// Project-local folder ingestion: preview, run, refresh, review, and clean up.
+    Ingest {
+        #[command(subcommand)]
+        command: IngestCommand,
+    },
+    /// Search and package project-local ingested knowledge.
+    Knowledge {
+        #[command(subcommand)]
+        command: KnowledgeCommand,
     },
     /// Export a session transcript as a redacted, inspectable bundle.
     Export {
@@ -265,6 +276,46 @@ enum LearningCommand {
     },
     /// Print the memory-change audit log.
     Audit,
+}
+
+#[derive(Debug, Subcommand)]
+enum IngestCommand {
+    /// Preview candidate files, exclusions, and budgets.
+    Preview,
+    /// Run a full ingestion pass.
+    Run,
+    /// Show the current ingest job status.
+    Status,
+    /// Pause the current ingest job.
+    Pause,
+    /// Mark a paused/cancelled job queued for resume.
+    Resume,
+    /// Cancel the current ingest job.
+    Cancel,
+    /// Refresh changed files only.
+    Refresh,
+    /// Delete derived ingestion state.
+    Rebuild,
+    /// Show skipped files and reasons from the latest manifest.
+    Skipped,
+    /// Add an explicit include rule.
+    Include { path: PathBuf },
+    /// Add an explicit exclude rule.
+    Exclude { path: PathBuf },
+    /// Remove derived records for a path or artifact id.
+    Forget { target: String },
+    /// List generated ingestion review items.
+    Review,
+    /// Queue an ingestion item for LocalMind review.
+    Promote { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum KnowledgeCommand {
+    /// Search ingested project knowledge.
+    Search { query: String },
+    /// Build a task-specific context pack.
+    Pack { task: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -637,6 +688,52 @@ async fn main() -> anyhow::Result<()> {
                     }
                 },
                 LearningCommand::Audit => learning_cmd::audit(&cwd, &mut stdout)?,
+            }
+        }
+        Command::Ingest { command } => {
+            let cwd = std::env::current_dir()?;
+            let mut stdout = io::stdout().lock();
+            match command {
+                IngestCommand::Preview => ingest_cmd::preview(&cwd, &mut stdout)?,
+                IngestCommand::Run => {
+                    ingest_cmd::run(&cwd, localpilot_localmind::RunMode::Full, &mut stdout)?
+                }
+                IngestCommand::Status => ingest_cmd::status(&cwd, &mut stdout)?,
+                IngestCommand::Pause => {
+                    ingest_cmd::control(&cwd, ingest_cmd::ControlAction::Pause, &mut stdout)?
+                }
+                IngestCommand::Resume => {
+                    ingest_cmd::control(&cwd, ingest_cmd::ControlAction::Resume, &mut stdout)?
+                }
+                IngestCommand::Cancel => {
+                    ingest_cmd::control(&cwd, ingest_cmd::ControlAction::Cancel, &mut stdout)?
+                }
+                IngestCommand::Refresh => {
+                    ingest_cmd::run(&cwd, localpilot_localmind::RunMode::Refresh, &mut stdout)?
+                }
+                IngestCommand::Rebuild => ingest_cmd::rebuild(&cwd, &mut stdout)?,
+                IngestCommand::Skipped => ingest_cmd::skipped(&cwd, &mut stdout)?,
+                IngestCommand::Include { path } => {
+                    ingest_cmd::rule(&cwd, ingest_cmd::RuleAction::Include, &path, &mut stdout)?;
+                }
+                IngestCommand::Exclude { path } => {
+                    ingest_cmd::rule(&cwd, ingest_cmd::RuleAction::Exclude, &path, &mut stdout)?;
+                }
+                IngestCommand::Forget { target } => ingest_cmd::forget(&cwd, &target, &mut stdout)?,
+                IngestCommand::Review => ingest_cmd::review(&cwd, &mut stdout)?,
+                IngestCommand::Promote { id } => ingest_cmd::promote(&cwd, &id, &mut stdout)?,
+            }
+        }
+        Command::Knowledge { command } => {
+            let cwd = std::env::current_dir()?;
+            let mut stdout = io::stdout().lock();
+            match command {
+                KnowledgeCommand::Search { query } => {
+                    ingest_cmd::knowledge_search(&cwd, &query, &mut stdout)?;
+                }
+                KnowledgeCommand::Pack { task } => {
+                    ingest_cmd::knowledge_pack(&cwd, &task, &mut stdout)?;
+                }
             }
         }
         Command::Export { session, out } => {

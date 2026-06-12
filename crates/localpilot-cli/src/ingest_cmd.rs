@@ -1,0 +1,271 @@
+use std::io::Write;
+use std::path::Path;
+
+use localpilot_config::{CliOverrides, ConfigPaths};
+use localpilot_localmind::{CandidateStatus, IngestJob, JobStatus, RunMode};
+
+/// Print an ingestion preview.
+///
+/// # Errors
+/// Returns an error if config cannot be loaded or discovery fails.
+pub fn preview(project_root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    let config = load_ingest_config(project_root)?;
+    let manifest = localpilot_localmind::ingest_preview(project_root, &config)?;
+    writeln!(
+        out,
+        "candidate files: {}",
+        manifest.estimates.candidate_files
+    )?;
+    writeln!(out, "skipped files: {}", manifest.estimates.skipped_files)?;
+    writeln!(
+        out,
+        "candidate bytes: {}",
+        manifest.estimates.candidate_bytes
+    )?;
+    writeln!(
+        out,
+        "estimated tokens: {}",
+        manifest.estimates.token_estimate
+    )?;
+    for entry in manifest.entries.iter().take(50) {
+        writeln!(
+            out,
+            "{}\t{:?}\t{}\t{}",
+            entry.path,
+            entry.status,
+            entry.size_bytes,
+            entry.skip_reason.as_deref().unwrap_or("")
+        )?;
+    }
+    Ok(())
+}
+
+/// Run or refresh ingestion.
+///
+/// # Errors
+/// Returns an error if config cannot be loaded or ingestion fails.
+pub fn run(project_root: &Path, mode: RunMode, out: &mut dyn Write) -> anyhow::Result<()> {
+    let config = load_ingest_config(project_root)?;
+    let summary = localpilot_localmind::ingest_run(project_root, &config, mode)?;
+    writeln!(out, "status: {}", job_status(summary.job.status))?;
+    writeln!(out, "files: {}", summary.job.completed_files)?;
+    writeln!(out, "skipped: {}", summary.job.skipped_files)?;
+    writeln!(out, "chunks: {}", summary.chunks_written)?;
+    Ok(())
+}
+
+/// Print current ingestion status.
+///
+/// # Errors
+/// Returns an error if state cannot be read.
+pub fn status(project_root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    match localpilot_localmind::ingest_status(project_root)? {
+        Some(job) => render_job(&job, out)?,
+        None => writeln!(out, "no ingest job")?,
+    }
+    Ok(())
+}
+
+/// Set a control state on the current job.
+///
+/// # Errors
+/// Returns an error if state cannot be updated.
+pub fn control(
+    project_root: &Path,
+    action: ControlAction,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let job = match action {
+        ControlAction::Pause => localpilot_localmind::ingest_pause(project_root)?,
+        ControlAction::Resume => localpilot_localmind::ingest_resume(project_root)?,
+        ControlAction::Cancel => localpilot_localmind::ingest_cancel(project_root)?,
+    };
+    match job {
+        Some(job) => render_job(&job, out)?,
+        None => writeln!(out, "no ingest job")?,
+    }
+    Ok(())
+}
+
+/// Rebuild derived ingestion state.
+///
+/// # Errors
+/// Returns an error if state cannot be deleted.
+pub fn rebuild(project_root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    localpilot_localmind::ingest_rebuild(project_root)?;
+    writeln!(out, "deleted derived ingestion state")?;
+    Ok(())
+}
+
+/// Print skipped files.
+///
+/// # Errors
+/// Returns an error if the manifest cannot be read.
+pub fn skipped(project_root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    for entry in localpilot_localmind::ingest_skipped(project_root)? {
+        writeln!(
+            out,
+            "{}\t{:?}\t{}",
+            entry.path,
+            entry.status,
+            entry.skip_reason.as_deref().unwrap_or("")
+        )?;
+    }
+    Ok(())
+}
+
+/// Add an include or exclude rule.
+///
+/// # Errors
+/// Returns an error if config cannot be updated.
+pub fn rule(
+    project_root: &Path,
+    action: RuleAction,
+    path: &Path,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let rule = match action {
+        RuleAction::Include => localpilot_localmind::ingest_include(project_root, path)?,
+        RuleAction::Exclude => localpilot_localmind::ingest_exclude(project_root, path)?,
+    };
+    writeln!(out, "{} {}", rule_action(action), rule)?;
+    Ok(())
+}
+
+/// Forget derived knowledge for a path or id.
+///
+/// # Errors
+/// Returns an error if state cannot be updated.
+pub fn forget(project_root: &Path, target: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    let removed = localpilot_localmind::ingest_forget(project_root, target)?;
+    writeln!(out, "removed {removed} derived record(s)")?;
+    Ok(())
+}
+
+/// List ingestion review items.
+///
+/// # Errors
+/// Returns an error if review state cannot be read.
+pub fn review(project_root: &Path, out: &mut dyn Write) -> anyhow::Result<()> {
+    let items = localpilot_localmind::ingest_review_items(project_root)?;
+    if items.is_empty() {
+        writeln!(out, "no ingestion review items")?;
+        return Ok(());
+    }
+    for item in items {
+        writeln!(out, "{}\t{}\t{}", item.id, item.kind, item.title)?;
+    }
+    Ok(())
+}
+
+/// Enqueue an ingestion item into LocalMind review.
+///
+/// # Errors
+/// Returns an error if promotion fails.
+pub fn promote(project_root: &Path, id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    let inserted = localpilot_localmind::ingest_promote(project_root, id)?;
+    writeln!(out, "queued {inserted} review item(s)")?;
+    Ok(())
+}
+
+/// Search ingested knowledge.
+///
+/// # Errors
+/// Returns an error if chunks cannot be searched.
+pub fn knowledge_search(
+    project_root: &Path,
+    query: &str,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    for hit in localpilot_localmind::knowledge_search(project_root, query)? {
+        writeln!(
+            out,
+            "{}:{}-{}\tscore {}\t{}",
+            hit.path, hit.start_line, hit.end_line, hit.score, hit.snippet
+        )?;
+    }
+    Ok(())
+}
+
+/// Build a task context pack.
+///
+/// # Errors
+/// Returns an error if the pack cannot be built.
+pub fn knowledge_pack(project_root: &Path, task: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    let pack = localpilot_localmind::build_pack(project_root, task, 4_000)?;
+    writeln!(out, "task: {}", pack.task)?;
+    writeln!(out, "chunks: {}", pack.chunks.len())?;
+    writeln!(out, "estimated tokens: {}", pack.token_estimate)?;
+    for hit in pack.chunks {
+        writeln!(out, "{}:{}-{}", hit.path, hit.start_line, hit.end_line)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ControlAction {
+    Pause,
+    Resume,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RuleAction {
+    Include,
+    Exclude,
+}
+
+fn load_ingest_config(project_root: &Path) -> anyhow::Result<localpilot_config::IngestConfig> {
+    Ok(localpilot_config::load(
+        &ConfigPaths::standard(project_root),
+        &CliOverrides::default(),
+    )?
+    .ingest)
+}
+
+fn render_job(job: &IngestJob, out: &mut dyn Write) -> anyhow::Result<()> {
+    writeln!(out, "status: {}", job_status(job.status))?;
+    writeln!(out, "run: {}", job.run_id)?;
+    writeln!(out, "mode: {}", job.mode)?;
+    writeln!(out, "queued: {}", job.queued_files)?;
+    writeln!(out, "completed: {}", job.completed_files)?;
+    writeln!(out, "failed: {}", job.failed_files)?;
+    writeln!(out, "skipped: {}", job.skipped_files)?;
+    if let Some(message) = &job.message {
+        writeln!(out, "message: {message}")?;
+    }
+    Ok(())
+}
+
+fn job_status(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::Queued => "queued",
+        JobStatus::Running => "running",
+        JobStatus::Paused => "paused",
+        JobStatus::Cancelled => "cancelled",
+        JobStatus::Failed => "failed",
+        JobStatus::Completed => "completed",
+    }
+}
+
+fn rule_action(action: RuleAction) -> &'static str {
+    match action {
+        RuleAction::Include => "included",
+        RuleAction::Exclude => "excluded",
+    }
+}
+
+#[allow(dead_code)]
+fn _status_name(status: CandidateStatus) -> &'static str {
+    match status {
+        CandidateStatus::Candidate => "candidate",
+        CandidateStatus::Ignored => "ignored",
+        CandidateStatus::Excluded => "excluded",
+        CandidateStatus::Generated => "generated",
+        CandidateStatus::Binary => "binary",
+        CandidateStatus::Unsupported => "unsupported",
+        CandidateStatus::TooLarge => "too_large",
+        CandidateStatus::DecodeFailed => "decode_failed",
+        CandidateStatus::OverBudget => "over_budget",
+    }
+}
