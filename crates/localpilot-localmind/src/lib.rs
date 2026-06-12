@@ -21,13 +21,13 @@ pub use codegraph::{
     SymbolReport,
 };
 pub use ingest::{
-    build_pack, cancel as ingest_cancel, forget as ingest_forget, normalize_project_path,
-    pause as ingest_pause, preview as ingest_preview, promote_for_review as ingest_promote,
-    rebuild as ingest_rebuild, resume as ingest_resume, review_items as ingest_review_items,
-    run as ingest_run, search as knowledge_search, skipped as ingest_skipped,
-    status as ingest_status, BudgetEstimate, CandidateStatus, ChunkRecord, ContextPack,
-    IngestError, IngestJob, IngestReviewItem, JobStatus, KnowledgeHit, ManifestEntry,
-    PreviewManifest, RunMode, RunSummary,
+    build_pack, cancel as ingest_cancel, exclude_path as ingest_exclude, forget as ingest_forget,
+    include_path as ingest_include, normalize_project_path, pause as ingest_pause,
+    preview as ingest_preview, promote_for_review as ingest_promote, rebuild as ingest_rebuild,
+    resume as ingest_resume, review_items as ingest_review_items, run as ingest_run,
+    search as knowledge_search, skipped as ingest_skipped, status as ingest_status, BudgetEstimate,
+    CandidateStatus, ChunkRecord, ContextPack, IngestError, IngestJob, IngestReviewItem, JobStatus,
+    KnowledgeHit, ManifestEntry, PreviewManifest, RunMode, RunSummary,
 };
 pub use ops::{
     audit, context_for, memory_delete, memory_disable_injection, memory_injection_enabled,

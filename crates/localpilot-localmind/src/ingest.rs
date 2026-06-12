@@ -54,6 +54,11 @@ pub enum IngestError {
         path: PathBuf,
         source: Box<toml::de::Error>,
     },
+    #[error("toml write error at {path}: {source}")]
+    TomlSerialize {
+        path: PathBuf,
+        source: Box<toml::ser::Error>,
+    },
     #[error("localmind review queue: {0}")]
     Review(String),
     #[error("invalid confidence for review candidate: {0}")]
@@ -504,6 +509,24 @@ pub fn forget(project_root: &Path, target: &str) -> Result<usize, IngestError> {
     Ok(removed)
 }
 
+/// Add an explicit include rule to the project-local LocalPilot config.
+///
+/// # Errors
+/// Returns [`IngestError`] when the path escapes the project or config cannot
+/// be written.
+pub fn include_path(project_root: &Path, path: &Path) -> Result<String, IngestError> {
+    update_rule(project_root, "include", path)
+}
+
+/// Add an explicit exclude rule to the project-local LocalPilot config.
+///
+/// # Errors
+/// Returns [`IngestError`] when the path escapes the project or config cannot
+/// be written.
+pub fn exclude_path(project_root: &Path, path: &Path) -> Result<String, IngestError> {
+    update_rule(project_root, "exclude", path)
+}
+
 /// Search deterministic chunk records.
 ///
 /// # Errors
@@ -701,6 +724,62 @@ fn set_job_status(
     job.message = Some(message.to_string());
     write_json(&path, &job)?;
     Ok(Some(job))
+}
+
+fn update_rule(project_root: &Path, key: &str, path: &Path) -> Result<String, IngestError> {
+    let relative = normalize_project_path(project_root, path)?;
+    let rule = slash_path(&relative);
+    let config_path = canonical_root(project_root)?.join(".localpilot.toml");
+    let mut doc = if config_path.exists() {
+        let text = fs::read_to_string(&config_path).map_err(|source| IngestError::Io {
+            path: config_path.clone(),
+            source,
+        })?;
+        text.parse::<toml::Value>()
+            .map_err(|source| IngestError::Toml {
+                path: config_path.clone(),
+                source: Box::new(source),
+            })?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+    let Some(root_table) = doc.as_table_mut() else {
+        return Err(IngestError::Review(
+            ".localpilot.toml root must be a table".to_string(),
+        ));
+    };
+    let ingest = root_table
+        .entry("ingest".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let Some(ingest_table) = ingest.as_table_mut() else {
+        return Err(IngestError::Review(
+            ".localpilot.toml [ingest] must be a table".to_string(),
+        ));
+    };
+    ingest_table.insert("enabled".to_string(), toml::Value::Boolean(true));
+    let entry = ingest_table
+        .entry(key.to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    let Some(values) = entry.as_array_mut() else {
+        return Err(IngestError::Review(format!(
+            ".localpilot.toml ingest.{key} must be an array"
+        )));
+    };
+    if !values
+        .iter()
+        .any(|value| value.as_str() == Some(rule.as_str()))
+    {
+        values.push(toml::Value::String(rule.clone()));
+    }
+    let text = toml::to_string_pretty(&doc).map_err(|source| IngestError::TomlSerialize {
+        path: config_path.clone(),
+        source: Box::new(source),
+    })?;
+    fs::write(&config_path, text).map_err(|source| IngestError::Io {
+        path: config_path,
+        source,
+    })?;
+    Ok(rule)
 }
 
 fn walker(root: &Path) -> ignore::Walk {

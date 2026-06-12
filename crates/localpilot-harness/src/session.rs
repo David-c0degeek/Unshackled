@@ -998,29 +998,33 @@ impl SessionRuntime {
 
                 // Track per-tool failure counts for the safeguard.
                 if result.is_error {
-                    let count = self.tool_failure_guard.record_failure(&name);
-                    if count == DEFAULT_TOOL_FAILURE_THRESHOLD {
-                        let msg = format!(
-                            "tool `{name}` has failed {count} times this turn; stopping further \
-                             calls and trying another approach"
-                        );
-                        let _ = events.send(RuntimeEvent::Warning(msg.clone()));
-                        let _ = events.send(RuntimeEvent::ToolStuck {
-                            name: name.clone(),
-                            count,
-                        });
-                    } else if count > DEFAULT_TOOL_FAILURE_THRESHOLD {
-                        let _ = events.send(RuntimeEvent::Warning(format!(
-                            "tool `{name}` failed again (#{count}); still stuck"
-                        )));
-                    } else {
-                        let _ = events.send(RuntimeEvent::Warning(format!(
-                            "tool `{name}` failed ({}/{})",
-                            count, DEFAULT_TOOL_FAILURE_THRESHOLD
-                        )));
+                    let count = self.tool_failure_guard.record_failure(name);
+                    match count.cmp(&DEFAULT_TOOL_FAILURE_THRESHOLD) {
+                        std::cmp::Ordering::Equal => {
+                            let msg = format!(
+                                "tool `{name}` has failed {count} times this turn; stopping further \
+                                 calls and trying another approach"
+                            );
+                            let _ = events.send(RuntimeEvent::Warning(msg.clone()));
+                            let _ = events.send(RuntimeEvent::ToolStuck {
+                                name: name.clone(),
+                                count,
+                            });
+                        }
+                        std::cmp::Ordering::Greater => {
+                            let _ = events.send(RuntimeEvent::Warning(format!(
+                                "tool `{name}` failed again (#{count}); still stuck"
+                            )));
+                        }
+                        std::cmp::Ordering::Less => {
+                            let _ = events.send(RuntimeEvent::Warning(format!(
+                                "tool `{name}` failed ({}/{})",
+                                count, DEFAULT_TOOL_FAILURE_THRESHOLD
+                            )));
+                        }
                     }
                 } else {
-                    self.tool_failure_guard.record_success(&name);
+                    self.tool_failure_guard.record_success(name);
                 }
                 let _ = events.send(RuntimeEvent::ToolFinished {
                     id: result.id.to_string(),
