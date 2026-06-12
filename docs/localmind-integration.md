@@ -62,6 +62,11 @@ depends on LocalMind, never the reverse.
   applied before write; no network).
 - Promoting an accepted review item anchors the new memory to the code nodes
   its hints resolve to, so graph retrieval can surface it by structure.
+- Folder ingestion writes rebuildable derived knowledge under
+  `.localmind/ingest/`: manifests, redacted chunks, job state, review
+  candidates, and task context packs. Normal turns may receive compact
+  high-ranking ingested chunks as local context, but that context is not accepted
+  memory. Promotion from ingestion enqueues LocalMind review items first.
 
 State is project-local under `.localmind/`. Durable memory is readable Markdown;
 queue, audit, search index, and the code-structure graph live in SQLite.
