@@ -223,7 +223,7 @@ pub async fn run_chat(
         },
     )
     .await;
-    leave_terminal(&mut terminal)?;
+    leave_terminal(&mut terminal, mouse_capture)?;
     // Learn from the finished session. This is best-effort so terminal teardown
     // is never held hostage by the learning subsystem.
     crate::context_inject::close_out(&cwd, session_id);
@@ -1225,17 +1225,28 @@ fn enter_terminal(capture_mouse: bool) -> anyhow::Result<Terminal<CrosstermBacke
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
-fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
+fn leave_terminal(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    capture_mouse: bool,
+) -> anyhow::Result<()> {
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     let _ = write_mouse_tracking_off(terminal.backend_mut());
     let _ = write_alternate_scroll_off(terminal.backend_mut());
     terminal::disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        DisableBracketedPaste,
-        DisableMouseCapture,
-        terminal::LeaveAlternateScreen
-    )?;
+    if capture_mouse {
+        execute!(
+            terminal.backend_mut(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            terminal::LeaveAlternateScreen
+        )?;
+    } else {
+        execute!(
+            terminal.backend_mut(),
+            DisableBracketedPaste,
+            terminal::LeaveAlternateScreen
+        )?;
+    }
     let _ = write_mouse_tracking_off(terminal.backend_mut());
     let _ = write_alternate_scroll_off(terminal.backend_mut());
     terminal.show_cursor()?;
