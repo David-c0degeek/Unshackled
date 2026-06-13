@@ -97,6 +97,14 @@ fn mouse_tracking_off_writes_all_common_disable_sequences() {
 }
 
 #[test]
+fn alternate_scroll_off_writes_the_xterm_disable_sequence() {
+    let mut out = Vec::new();
+    key_input::write_alternate_scroll_off(&mut out).unwrap();
+
+    assert_eq!(out, b"\x1b[?1007l");
+}
+
+#[test]
 fn unbracketed_paste_newline_is_inserted_when_text_is_buffered() {
     let now = Instant::now();
 

@@ -129,9 +129,12 @@ the runtime in-process or driving it headless over RPC/ACP.
 ### Chat controls
 
 `PageUp` and `PageDown` scroll the transcript. The default mouse mode keeps
-normal terminal selection available and leaves wheel input with the terminal.
-Press `F12` to toggle mouse-wheel scrolling for the transcript; press `F12`
-again to restore normal terminal selection. Set
+normal terminal selection available and disables terminal alternate-scroll so
+wheel notches do not navigate the input history. Press `F12` to toggle
+mouse-wheel scrolling for the transcript; in wheel mode, wheel notches use the
+same transcript paging path as `PageUp` and `PageDown`. Press `F12` again to
+restore normal terminal selection. Bracketed paste stays enabled in both mouse
+modes. Set
 `LOCALPILOT_ENABLE_MOUSE_CAPTURE=1` to start in wheel mode.
 
 ## Build features

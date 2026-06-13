@@ -36,8 +36,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::key_input::{
     is_cancel, is_key_action, is_newline, is_submit, is_unbracketed_paste_newline_key,
-    may_be_unbracketed_paste_key, mouse_capture_enabled, write_mouse_tracking_off,
-    UnbracketedPaste, UnbracketedPasteAction,
+    may_be_unbracketed_paste_key, mouse_capture_enabled, write_alternate_scroll_off,
+    write_mouse_tracking_off, UnbracketedPaste, UnbracketedPasteAction,
 };
 
 const MOUSE_TOGGLE_KEY: u8 = 12;
@@ -951,6 +951,7 @@ fn toggle_mouse_capture(
     } else {
         execute!(terminal.backend_mut(), DisableMouseCapture)?;
         write_mouse_tracking_off(terminal.backend_mut())?;
+        write_alternate_scroll_off(terminal.backend_mut())?;
         state.apply(UiEvent::Notice(
             "normal terminal selection restored; press F12 for mouse wheel scrolling".to_string(),
         ));
@@ -988,8 +989,8 @@ fn slash_picker_exact_submit(state: &AppState, key: KeyEvent) -> bool {
 
 fn map_mouse(kind: MouseEventKind) -> Option<Key> {
     match kind {
-        MouseEventKind::ScrollUp => Some(Key::ScrollUp),
-        MouseEventKind::ScrollDown => Some(Key::ScrollDown),
+        MouseEventKind::ScrollUp => Some(Key::PageUp),
+        MouseEventKind::ScrollDown => Some(Key::PageDown),
         _ => None,
     }
 }
@@ -1147,6 +1148,7 @@ async fn discovered_window(
 fn enter_terminal(capture_mouse: bool) -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     let mut stdout = io::stdout();
     write_mouse_tracking_off(&mut stdout)?;
+    write_alternate_scroll_off(&mut stdout)?;
     terminal::enable_raw_mode()?;
     if capture_mouse {
         execute!(
@@ -1158,6 +1160,7 @@ fn enter_terminal(capture_mouse: bool) -> anyhow::Result<Terminal<CrosstermBacke
     } else {
         execute!(stdout, terminal::EnterAlternateScreen, EnableBracketedPaste)?;
         write_mouse_tracking_off(&mut stdout)?;
+        write_alternate_scroll_off(&mut stdout)?;
     }
     // Ask the terminal to report keys unambiguously (the kitty keyboard
     // protocol), so modified keys like Alt+Enter / Shift+Enter reach the app.
@@ -1181,6 +1184,7 @@ fn enter_terminal(capture_mouse: bool) -> anyhow::Result<Terminal<CrosstermBacke
 fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     let _ = write_mouse_tracking_off(terminal.backend_mut());
+    let _ = write_alternate_scroll_off(terminal.backend_mut());
     terminal::disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -1189,6 +1193,7 @@ fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::
         terminal::LeaveAlternateScreen
     )?;
     let _ = write_mouse_tracking_off(terminal.backend_mut());
+    let _ = write_alternate_scroll_off(terminal.backend_mut());
     terminal.show_cursor()?;
     Ok(())
 }

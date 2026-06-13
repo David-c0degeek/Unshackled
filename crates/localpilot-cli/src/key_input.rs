@@ -3,8 +3,14 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+const ALTERNATE_SCROLL_OFF: &[u8] = b"\x1b[?1007l";
 const MOUSE_TRACKING_OFF: &[u8] = b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
 const UNBRACKETED_PASTE_WINDOW: Duration = Duration::from_millis(35);
+
+pub(crate) fn write_alternate_scroll_off(out: &mut impl Write) -> io::Result<()> {
+    out.write_all(ALTERNATE_SCROLL_OFF)?;
+    out.flush()
+}
 
 pub(crate) fn write_mouse_tracking_off(out: &mut impl Write) -> io::Result<()> {
     out.write_all(MOUSE_TRACKING_OFF)?;
