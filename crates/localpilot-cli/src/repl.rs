@@ -1018,12 +1018,7 @@ fn enter_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
             EnableMouseCapture
         )?;
     } else {
-        execute!(
-            stdout,
-            terminal::EnterAlternateScreen,
-            EnableBracketedPaste,
-            DisableMouseCapture
-        )?;
+        execute!(stdout, terminal::EnterAlternateScreen, EnableBracketedPaste)?;
         write_mouse_tracking_off(&mut stdout)?;
     }
     // Ask the terminal to report keys unambiguously (the kitty keyboard
@@ -1049,12 +1044,20 @@ fn leave_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     let _ = write_mouse_tracking_off(terminal.backend_mut());
     terminal::disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        DisableBracketedPaste,
-        DisableMouseCapture,
-        terminal::LeaveAlternateScreen
-    )?;
+    if mouse_capture_enabled() {
+        execute!(
+            terminal.backend_mut(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            terminal::LeaveAlternateScreen
+        )?;
+    } else {
+        execute!(
+            terminal.backend_mut(),
+            DisableBracketedPaste,
+            terminal::LeaveAlternateScreen
+        )?;
+    }
     let _ = write_mouse_tracking_off(terminal.backend_mut());
     terminal.show_cursor()?;
     Ok(())
