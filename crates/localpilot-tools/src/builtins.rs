@@ -1109,6 +1109,112 @@ impl Tool for RunShell {
     }
 }
 
+// --- fetch -------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FetchInput {
+    /// http or https URL to retrieve.
+    url: String,
+    /// Maximum number of body bytes to return. Capped at the tool output limit.
+    #[serde(default)]
+    max_bytes: Option<usize>,
+    /// Request timeout in seconds. Defaults to 30.
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+const FETCH_DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+/// Validate that a URL uses an http/https scheme before any network effect is
+/// resolved. Rejecting other schemes (`file:`, `ftp:`, …) keeps `fetch` from
+/// reading local resources and sidestepping the workspace boundary.
+fn validate_fetch_url(url: &str) -> Result<(), ToolError> {
+    let scheme = url
+        .split_once("://")
+        .map(|(scheme, _)| scheme)
+        .filter(|rest| !rest.is_empty())
+        .ok_or_else(|| {
+            ToolError::InvalidInput(format!("url must be an http or https URL: {url}"))
+        })?;
+    if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidInput(format!(
+            "url scheme must be http or https, got `{scheme}`"
+        )))
+    }
+}
+
+pub struct Fetch;
+
+#[async_trait]
+impl Tool for Fetch {
+    fn name(&self) -> &'static str {
+        "fetch"
+    }
+    fn approval_detail(&self, input: &Value) -> String {
+        string_field_detail(input, "url")
+    }
+    fn description(&self) -> &'static str {
+        "Fetch the body of an http or https URL over the network."
+    }
+    fn schema(&self) -> Value {
+        schema_for::<FetchInput>()
+    }
+    fn effects(&self, input: &Value, _ctx: &ToolContext<'_>) -> Result<Vec<Effect>, ToolError> {
+        let input: FetchInput = parse_input(input)?;
+        validate_fetch_url(&input.url)?;
+        Ok(vec![Effect::Network])
+    }
+    async fn invoke(&self, input: Value, _ctx: &ToolContext<'_>) -> Result<ToolOutput, ToolError> {
+        let input: FetchInput = parse_input(&input)?;
+        validate_fetch_url(&input.url)?;
+        let timeout = Duration::from_secs(input.timeout_secs.unwrap_or(FETCH_DEFAULT_TIMEOUT_SECS));
+        let client = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|e| ToolError::Failed(format!("failed to build HTTP client: {e}")))?;
+
+        let response = client
+            .get(&input.url)
+            .send()
+            .await
+            .map_err(|e| ToolError::Failed(format!("request failed: {e}")))?;
+
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ToolError::Failed(format!("failed to read response body: {e}")))?;
+
+        let body = match input.max_bytes {
+            Some(limit) if limit < body.len() => {
+                let mut end = limit;
+                while end > 0 && !body.is_char_boundary(end) {
+                    end -= 1;
+                }
+                body[..end].to_string()
+            }
+            _ => body,
+        };
+
+        let header = if content_type.is_empty() {
+            format!("HTTP {status}\n")
+        } else {
+            format!("HTTP {status} {content_type}\n")
+        };
+        let mut result = cap(format!("{header}{body}"));
+        result.is_error = !status.is_success();
+        Ok(result)
+    }
+}
+
 // --- git_status / git_diff / git_log / git_add / git_restore / git_commit ---
 
 #[derive(Debug, Deserialize, JsonSchema)]

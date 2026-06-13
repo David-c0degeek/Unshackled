@@ -24,6 +24,19 @@ pub trait Transport: Send + Sync {
     /// # Errors
     /// Returns [`McpError::Transport`] or [`McpError::Protocol`] on failure.
     async fn call(&self, method: &str, params: Value) -> Result<Value, McpError>;
+
+    /// Send a JSON-RPC notification: a request with no `id` for which no
+    /// response is awaited. Used for `notifications/initialized`.
+    ///
+    /// The default is a no-op, which suits transports (e.g. the scripted test
+    /// transport) that have nothing to notify.
+    ///
+    /// # Errors
+    /// Returns [`McpError::Transport`] or [`McpError::Protocol`] on failure.
+    async fn notify(&self, method: &str, params: Value) -> Result<(), McpError> {
+        let _ = (method, params);
+        Ok(())
+    }
 }
 
 /// A live transport that speaks newline-delimited JSON-RPC over an MCP server
@@ -132,6 +145,31 @@ impl Transport for StdioTransport {
             }
             return Ok(value.get("result").cloned().unwrap_or(Value::Null));
         }
+    }
+
+    async fn notify(&self, method: &str, params: Value) -> Result<(), McpError> {
+        // A notification carries no `id` and expects no response.
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        let mut line =
+            serde_json::to_string(&request).map_err(|e| McpError::Protocol(e.to_string()))?;
+        line.push('\n');
+
+        let mut inner = self.inner.lock().await;
+        inner
+            .stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| McpError::Transport(e.to_string()))?;
+        inner
+            .stdin
+            .flush()
+            .await
+            .map_err(|e| McpError::Transport(e.to_string()))?;
+        Ok(())
     }
 }
 

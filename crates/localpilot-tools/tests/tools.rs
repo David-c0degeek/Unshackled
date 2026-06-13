@@ -5,6 +5,8 @@ use localpilot_core::{ToolCall, ToolResult, ToolUseId};
 use localpilot_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use localpilot_tools::{ToolContext, ToolRegistry};
 use serde_json::json;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn workspace_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Workspace) {
     let dir = tempfile::tempdir().unwrap();
@@ -86,7 +88,7 @@ async fn unknown_tool_returns_an_error_result_not_a_panic() {
 #[test]
 fn every_builtin_generates_a_schema() {
     let registry = ToolRegistry::with_builtins();
-    assert_eq!(registry.names().len(), 17);
+    assert_eq!(registry.names().len(), 18);
     for (name, schema) in registry.schemas() {
         assert!(schema.is_object(), "{name} produced a non-object schema");
     }
@@ -891,4 +893,89 @@ async fn oversized_output_is_bounded_and_spilled_to_retention() {
     .await;
     assert!(!fetched.is_error, "{}", fetched.output);
     assert!(fetched.output.contains("line of output"));
+}
+
+#[tokio::test]
+async fn fetch_returns_body_when_network_is_approved() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("hello from the web"))
+        .mount(&server)
+        .await;
+
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let result = dispatch(
+        &registry,
+        "fetch",
+        json!({ "url": format!("{}/page", server.uri()) }),
+        &ctx(&ws, Interactivity::Interactive, true),
+        &default_engine(),
+        &ScriptedApprover::new(vec![true]),
+    )
+    .await;
+    assert!(!result.is_error, "{}", result.output);
+    assert!(result.output.contains("hello from the web"));
+}
+
+#[tokio::test]
+async fn fetch_is_denied_non_interactive_without_hitting_the_network() {
+    // No mock is mounted: a denied request must never reach a server.
+    let server = MockServer::start().await;
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let result = dispatch(
+        &registry,
+        "fetch",
+        json!({ "url": format!("{}/page", server.uri()) }),
+        &ctx(&ws, Interactivity::NonInteractive, true),
+        &default_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+    assert!(result.is_error);
+    assert!(result.output.contains("permission denied"));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        0,
+        "a denied fetch must not reach the network"
+    );
+}
+
+#[tokio::test]
+async fn fetch_approval_prompt_shows_the_url() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let c = ctx(&ws, Interactivity::Interactive, true);
+    let approver = RecordingApprover::new();
+
+    let url = "https://example.invalid/doc";
+    let call = ToolCall::new(ToolUseId::from("c1"), "fetch", json!({ "url": url }));
+    let _ = registry
+        .dispatch(&call, &c, &default_engine(), &approver)
+        .await;
+
+    let seen = approver.seen();
+    assert!(!seen.is_empty(), "a network fetch must prompt");
+    assert_eq!(seen[0].detail, url);
+}
+
+#[tokio::test]
+async fn fetch_rejects_non_http_schemes_without_a_network_call() {
+    let (_dir, ws) = workspace_with(&[]);
+    let registry = ToolRegistry::with_builtins();
+    let result = dispatch(
+        &registry,
+        "fetch",
+        json!({ "url": "file:///etc/passwd" }),
+        // Bypass would allow the network effect; the scheme check must still fire.
+        &ctx(&ws, Interactivity::Interactive, true),
+        &bypass_engine(),
+        &ScriptedApprover::always(),
+    )
+    .await;
+    assert!(result.is_error);
+    assert!(result.output.contains("invalid input"));
+    assert!(result.output.contains("http or https"));
 }

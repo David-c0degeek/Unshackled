@@ -6,8 +6,9 @@ use localpilot_sandbox::{Approver, Decision, PermissionEngine, PermissionRequest
 use serde_json::Value;
 
 use crate::builtins::{
-    ApplyPatch, EditFile, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore, GitStatus,
-    ListFiles, MultiEdit, ReadFile, ReadToolOutput, RunShell, SearchText, UpdatePlan, WriteFile,
+    ApplyPatch, EditFile, Fetch, FindFiles, GitAdd, GitCommit, GitDiff, GitLog, GitRestore,
+    GitStatus, ListFiles, MultiEdit, ReadFile, ReadToolOutput, RunShell, SearchText, UpdatePlan,
+    WriteFile,
 };
 use crate::tool::{GateVerdict, Tool, ToolContext, ToolGate};
 
@@ -45,6 +46,7 @@ impl ToolRegistry {
         registry.register(Box::new(SearchText));
         registry.register(Box::new(ApplyPatch));
         registry.register(Box::new(RunShell));
+        registry.register(Box::new(Fetch));
         registry.register(Box::new(ReadToolOutput));
         registry.register(Box::new(GitStatus));
         registry.register(Box::new(GitDiff));

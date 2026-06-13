@@ -114,8 +114,12 @@ of a conversation is the setup prompt; a system message appearing later (for
 example host-injected retrieved context) is a mid-conversation instruction and
 must reach the model at its original position in the history.
 
-- An adapter whose wire has a positional system role (OpenAI-style) sends a
-  late system message in place, unchanged.
+- An adapter whose wire has a positional system role (OpenAI-style) keeps a
+  late system message at its original position but delivers it as user-role
+  content. The chat-completions wire permits a positional system role, but many
+  model chat templates (served behind an OpenAI-compatible endpoint) reject a
+  system message that is not the first message; demoting the role — without
+  moving the message — is compatible with both.
 - An adapter whose wire hoists system content to a top-level field
   (Anthropic-style) hoists only the leading run. A later system message keeps
   its position and is delivered as user-role content, merged with adjacent

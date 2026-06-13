@@ -221,13 +221,32 @@ fn translate_tool(tool: &ToolSpec) -> Value {
 
 fn translate_messages(messages: &[Message], round_trip_reasoning: bool) -> Vec<Value> {
     let mut out = Vec::new();
+    let mut in_leading_system = true;
     for message in messages {
-        translate_message(message, round_trip_reasoning, &mut out);
+        // Only the leading run of system messages is the setup prompt. A system
+        // message appearing later (e.g. host-injected retrieved context) keeps
+        // its position but is delivered as user-role content: it is not reordered
+        // to the front (docs/04 §Late System Messages), and many model chat
+        // templates reject a system message that is not the first message.
+        let role_override = if message.role == Role::System && !in_leading_system {
+            Some("user")
+        } else {
+            None
+        };
+        if message.role != Role::System {
+            in_leading_system = false;
+        }
+        translate_message(message, role_override, round_trip_reasoning, &mut out);
     }
     out
 }
 
-fn translate_message(message: &Message, round_trip_reasoning: bool, out: &mut Vec<Value>) {
+fn translate_message(
+    message: &Message,
+    role_override: Option<&'static str>,
+    round_trip_reasoning: bool,
+    out: &mut Vec<Value>,
+) {
     // Tool results become their own role:"tool" messages, one per result.
     if message.role == Role::Tool {
         for block in &message.content {
@@ -276,7 +295,10 @@ fn translate_message(message: &Message, round_trip_reasoning: bool, out: &mut Ve
     }
 
     let mut obj = serde_json::Map::new();
-    obj.insert("role".to_string(), json!(role_str(message.role)));
+    obj.insert(
+        "role".to_string(),
+        json!(role_override.unwrap_or_else(|| role_str(message.role))),
+    );
     if tool_calls.is_empty() {
         obj.insert("content".to_string(), json!(text));
     } else {
@@ -1056,10 +1078,13 @@ mod tests {
         let body = provider.build_body(&ModelRequest::new("m", messages));
         let wire = body["messages"].as_array().unwrap();
         let roles: Vec<&str> = wire.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        // The late system message keeps its position (index 3, not reordered to
+        // the front) but is delivered as user-role content, since many model
+        // chat templates reject a non-leading system message.
         assert_eq!(
             roles,
-            vec!["system", "user", "assistant", "system", "user"],
-            "a late system message is not reordered"
+            vec!["system", "user", "assistant", "user", "user"],
+            "a late system message keeps its position but is delivered as user content"
         );
         assert_eq!(wire[3]["content"], "project context: uses tokio");
     }

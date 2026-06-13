@@ -1449,12 +1449,14 @@ dependencies = [
  "localpilot-core",
  "localpilot-sandbox",
  "regex",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]

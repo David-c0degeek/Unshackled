@@ -1,6 +1,5 @@
 ---
 source: crates/localpilot-tools/tests/tools.rs
-assertion_line: 99
 expression: "serde_json::to_string_pretty(&schemas).unwrap()"
 ---
 [
@@ -398,6 +397,43 @@ expression: "serde_json::to_string_pretty(&schemas).unwrap()"
         }
       },
       "title": "RunShellInput",
+      "type": "object"
+    }
+  ],
+  [
+    "fetch",
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "max_bytes": {
+          "default": null,
+          "description": "Maximum number of body bytes to return. Capped at the tool output limit.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timeout_secs": {
+          "default": null,
+          "description": "Request timeout in seconds. Defaults to 30.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "http or https URL to retrieve.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "FetchInput",
       "type": "object"
     }
   ],

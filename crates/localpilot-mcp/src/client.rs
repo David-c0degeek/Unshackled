@@ -12,6 +12,11 @@ use crate::error::McpError;
 use crate::transport::Transport;
 use crate::MCP_PROTOCOL_VERSION;
 
+/// The client name reported to servers in the initialize handshake.
+const CLIENT_NAME: &str = "localpilot";
+/// The client version reported to servers in the initialize handshake.
+const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// A tool advertised by an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpToolDescriptor {
@@ -46,17 +51,32 @@ impl McpClient {
     /// # Errors
     /// Returns [`McpError`] if the transport or response is invalid.
     pub async fn initialize(&self) -> Result<McpServerStatus, McpError> {
+        // The MCP spec requires `protocolVersion`, `capabilities`, and
+        // `clientInfo`; strict servers reject the handshake when the latter two
+        // are absent. We advertise no special client capabilities (`{}`).
         let result = self
             .transport
             .call(
                 "initialize",
-                json!({ "protocolVersion": MCP_PROTOCOL_VERSION }),
+                json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": CLIENT_NAME,
+                        "version": CLIENT_VERSION,
+                    },
+                }),
             )
             .await?;
         let protocol_version = result["protocolVersion"]
             .as_str()
             .unwrap_or(MCP_PROTOCOL_VERSION)
             .to_string();
+        // The spec requires the client to acknowledge a successful initialize
+        // with an `initialized` notification before issuing further requests.
+        self.transport
+            .notify("notifications/initialized", json!({}))
+            .await?;
         Ok(McpServerStatus {
             connected: true,
             protocol_version,

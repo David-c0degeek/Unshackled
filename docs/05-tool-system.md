@@ -103,6 +103,21 @@ Reads back the full retained output of an earlier tool call that was truncated
 in context, by its retention id, optionally a line range. No new side effect:
 the output was captured under the permission decision that produced it.
 
+### `fetch`
+
+Retrieves the body of an http/https URL over the network.
+
+Rules:
+
+- accept `http` and `https` schemes only; reject everything else so the tool
+  cannot read local resources and sidestep the workspace boundary
+- declare a network effect, so the call is gated by the permission engine (ask
+  interactive, deny non-interactive unless allowlisted) like any other network
+  action
+- set a timeout
+- cap output size and honor an optional smaller byte limit
+- output is redacted like every other tool result
+
 ### `run_shell`
 
 Runs a shell command.

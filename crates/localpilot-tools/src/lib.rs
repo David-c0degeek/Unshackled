@@ -13,8 +13,8 @@ mod registry;
 mod tool;
 
 pub use builtins::{
-    ApplyPatch, EditFile, GitCommit, GitStatus, ListFiles, ReadFile, ReadToolOutput, RunShell,
-    SearchText, WriteFile,
+    ApplyPatch, EditFile, Fetch, GitCommit, GitStatus, ListFiles, ReadFile, ReadToolOutput,
+    RunShell, SearchText, WriteFile,
 };
 pub use error::ToolError;
 pub use registry::ToolRegistry;
