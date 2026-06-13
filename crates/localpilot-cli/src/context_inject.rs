@@ -18,9 +18,18 @@ impl ContextHook for LocalMindContext {
     }
 
     fn context_for(&self, prompt: &str) -> Option<String> {
-        localpilot_localmind::context_for(&self.root, prompt)
+        let accepted = localpilot_localmind::context_for(&self.root, prompt)
             .ok()
-            .flatten()
+            .flatten();
+        let ingested = localpilot_localmind::ingest_context_for(&self.root, prompt)
+            .ok()
+            .flatten();
+        match (accepted, ingested) {
+            (Some(accepted), Some(ingested)) => Some(format!("{accepted}\n{ingested}")),
+            (Some(accepted), None) => Some(accepted),
+            (None, Some(ingested)) => Some(ingested),
+            (None, None) => None,
+        }
     }
 }
 

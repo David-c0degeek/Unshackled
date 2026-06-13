@@ -62,6 +62,11 @@ depends on LocalMind, never the reverse.
   applied before write; no network).
 - Promoting an accepted review item anchors the new memory to the code nodes
   its hints resolve to, so graph retrieval can surface it by structure.
+- Folder ingestion writes rebuildable derived knowledge under
+  `.localmind/ingest/`: manifests, redacted chunks, job state, review
+  candidates, and task context packs. Normal turns may receive compact
+  high-ranking ingested chunks as local context, but that context is not accepted
+  memory. Promotion from ingestion enqueues LocalMind review items first.
 
 State is project-local under `.localmind/`. Durable memory is readable Markdown;
 queue, audit, search index, and the code-structure graph live in SQLite.
@@ -110,3 +115,19 @@ localpilot memory export graph.json
 
 New rich-learning behavior lands in LocalMind, not by expanding host-local memory
 implementations.
+
+## Folder Ingestion Roadmap Boundaries
+
+The first ingestion implementation handles safe UTF-8 text-like files,
+deterministic manifests, redacted chunks, lexical search, review candidates, and
+task packs. These are local derived artifacts and can be rebuilt.
+
+The following remain staged behind explicit user approval and review:
+
+- rich extractors for PDF, DOCX, XLSX, images/OCR, archives, notebooks, and
+  language-aware graph expansion beyond the current code graph;
+- model-backed file, folder, and project summaries beyond deterministic review
+  shells;
+- external research/update flows. External facts must carry source citations,
+  expiry/staleness metadata, and a review item before they can influence
+  accepted memory.
