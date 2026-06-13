@@ -2,11 +2,13 @@
 default = "local"
 
 [providers.local]
-kind = "anthropic"
-base_url = "http://127.0.0.1:11435/v1"
-api_key_env = "ANTHROPIC_AUTH_TOKEN"
+kind = "openai-compatible"
+base_url = "http://localhost:11435/v1"
+model = "q3635ba3bapex"
+context_window = 131072
+
 [harness]
-context_token_limit = 262144
+context_token_limit = 100000
 
 [ingest]
 enabled = true

@@ -522,6 +522,7 @@ impl AppState {
         ("continue", "Continue the previous session"),
         ("clear", "Clear the conversation view"),
         ("compact", "Summarize and compact the context"),
+        ("compact_force", "Compact now, even if within the budget"),
         ("search", "Search the transcript"),
         ("resume", "Continue a previous session"),
         ("harness-resume", "Resume harness plan work"),

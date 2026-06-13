@@ -47,7 +47,11 @@ pub enum SlashAction {
     SetProfile(Profile),
     ToggleThinking,
     Clear,
-    Compact,
+    /// Compact the conversation. `force` trims even when it is within the
+    /// configured budget (`/compact force` / `/compact_force`).
+    Compact {
+        force: bool,
+    },
     Search(Option<String>),
     /// Set the reasoning-effort level (validated by the host).
     SetEffort(String),
@@ -127,7 +131,15 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
             reason: "usage: /effort minimal|low|medium|high".to_string(),
         },
         _ if name == "clear" && args.is_empty() => SlashAction::Clear,
-        _ if name == "compact" && args.is_empty() => SlashAction::Compact,
+        _ if name == "compact" && args.is_empty() => SlashAction::Compact { force: false },
+        _ if name == "compact" && args == "force" => SlashAction::Compact { force: true },
+        _ if matches!(name, "compact_force" | "compact-force") && args.is_empty() => {
+            SlashAction::Compact { force: true }
+        }
+        _ if name == "compact" => SlashAction::Invalid {
+            command: "compact".to_string(),
+            reason: "usage: /compact [force]".to_string(),
+        },
         _ if name == "search" => {
             let query = if args.is_empty() {
                 None
@@ -166,7 +178,8 @@ pub fn parse_slash(line: &str) -> Option<SlashAction> {
                 | "think"
                 | "thinking"
                 | "clear"
-                | "compact"
+                | "compact_force"
+                | "compact-force"
                 | "harness-resume"
                 | "wait-resume"
                 | "wait_resume"
@@ -375,7 +388,7 @@ fn apply_slash(state: &mut AppState, action: SlashAction) {
             state.clear_conversation_view();
             state.apply(UiEvent::Notice("conversation cleared".to_string()));
         }
-        SlashAction::Compact => state.apply(UiEvent::Notice(
+        SlashAction::Compact { .. } => state.apply(UiEvent::Notice(
             "/compact is handled by the interactive host".to_string(),
         )),
         SlashAction::Search(query) => state.set_search(query),

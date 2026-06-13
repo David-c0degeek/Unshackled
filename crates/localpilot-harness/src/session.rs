@@ -129,6 +129,10 @@ impl Default for SessionConfig {
 /// protocol overhead when deriving the session budget from a real window.
 const CONTEXT_RESERVE_TOKENS: usize = 4_096;
 
+/// Smallest target a forced compaction will aim for, so `/compact force` on a
+/// tiny configured limit still leaves a usable conversation.
+const FORCE_COMPACT_FLOOR: usize = 4_096;
+
 /// The session's effective context budget: the model's real window minus a
 /// response reserve when the window is known (per-provider `context_window`
 /// or discovery), otherwise the configured global limit. Estimates feeding
@@ -519,6 +523,32 @@ impl SessionRuntime {
         let context_used = estimate_tokens(&result.messages);
         self.messages = result.messages;
         self.history_generation += 1;
+        ManualCompaction {
+            compacted: result.compacted,
+            context_used,
+            context_limit: self.config.context_token_limit,
+        }
+    }
+
+    /// Force-compact the runtime history even when it is already within the
+    /// configured limit, by targeting roughly half the budget. The token
+    /// estimate undercounts some payloads (large tool outputs in particular), so
+    /// a model's real tokenizer can reject a request the budget believes fits;
+    /// this lets the user shrink the conversation on demand and keep going.
+    #[must_use]
+    pub fn compact_conversation_force(&mut self) -> ManualCompaction {
+        let target = (self.config.context_token_limit / 2).max(FORCE_COMPACT_FLOOR);
+        let result = compact_with_summary(self.messages.clone(), target);
+        if result.compacted {
+            if let Some(summary) = result.summary.clone() {
+                self.record_event(SessionEventKind::Compacted { summary });
+            }
+            self.hooks.notify(&HookEvent::Compacted);
+        }
+        let context_used = estimate_tokens(&result.messages);
+        self.messages = result.messages;
+        self.history_generation += 1;
+        self.compaction_cache = None;
         ManualCompaction {
             compacted: result.compacted,
             context_used,

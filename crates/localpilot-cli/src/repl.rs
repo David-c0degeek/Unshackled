@@ -452,8 +452,12 @@ async fn run_slash(
             });
             state.apply(UiEvent::Notice("conversation cleared".to_string()));
         }
-        SlashAction::Compact => {
-            let summary = runtime.compact_conversation();
+        SlashAction::Compact { force } => {
+            let summary = if force {
+                runtime.compact_conversation_force()
+            } else {
+                runtime.compact_conversation()
+            };
             state.apply(UiEvent::ContextUsage {
                 context_used: summary.context_used,
                 context_limit: summary.context_limit,
@@ -461,6 +465,11 @@ async fn run_slash(
             let notice = if summary.compacted {
                 format!(
                     "compacted conversation history; context {}/{}",
+                    summary.context_used, summary.context_limit
+                )
+            } else if force {
+                format!(
+                    "nothing left to compact; context {}/{}",
                     summary.context_used, summary.context_limit
                 )
             } else {

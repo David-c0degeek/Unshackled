@@ -179,7 +179,18 @@ fn resume_slash_commands_are_parsed_for_the_host() {
 #[test]
 fn clear_compact_and_search_slash_commands_are_parsed() {
     assert_eq!(parse_slash("/clear"), Some(SlashAction::Clear));
-    assert_eq!(parse_slash("/compact"), Some(SlashAction::Compact));
+    assert_eq!(
+        parse_slash("/compact"),
+        Some(SlashAction::Compact { force: false })
+    );
+    assert_eq!(
+        parse_slash("/compact force"),
+        Some(SlashAction::Compact { force: true })
+    );
+    assert_eq!(
+        parse_slash("/compact_force"),
+        Some(SlashAction::Compact { force: true })
+    );
     assert_eq!(
         parse_slash("/search parser errors"),
         Some(SlashAction::Search(Some("parser errors".to_string())))
