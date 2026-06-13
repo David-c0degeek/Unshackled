@@ -15,7 +15,7 @@ pub enum BadOutputKind {
     RepeatedTransientError,
 }
 
-/// A run of identical punctuation outside fenced code this long is degenerate.
+/// A run of forward slashes outside fenced code this long is degenerate.
 const SLASH_FLOOD_THRESHOLD: usize = 8;
 /// Even inside fenced code, a run this long is degenerate.
 const SLASH_FLOOD_IN_CODE_THRESHOLD: usize = 40;
@@ -39,7 +39,7 @@ pub fn detect(text: &str, has_tool_calls: bool) -> Option<BadOutputKind> {
     None
 }
 
-/// Whether `text` contains a degenerate run of repeated punctuation, accounting
+/// Whether `text` contains a degenerate run of repeated slashes, accounting
 /// for fenced code blocks where such runs are common and legitimate.
 #[must_use]
 pub fn is_slash_flood(text: &str) -> bool {
@@ -48,11 +48,11 @@ pub fn is_slash_flood(text: &str) -> bool {
 }
 
 fn is_punct_run_char(c: char) -> bool {
-    matches!(c, '/' | '\\' | '#' | '*' | '-' | '=' | '.' | '~')
+    c == '/'
 }
 
-/// Returns the longest run of a single repeated punctuation character outside and
-/// inside fenced code blocks (delimited by ```).
+/// Returns the longest run of forward slashes outside and inside fenced code
+/// blocks (delimited by ```).
 fn max_punctuation_runs(text: &str) -> (usize, usize) {
     let mut in_fence = false;
     let mut max_outside = 0;
@@ -258,6 +258,19 @@ mod tests {
             detect("here we go ////////////////", false),
             Some(BadOutputKind::SlashFlood)
         );
+    }
+
+    #[test]
+    fn markdown_table_separator_is_not_a_slash_flood() {
+        let table =
+            "| Project | Test Coverage | Assessment |\n|---------|---------------|------------|";
+        assert_eq!(detect(table, false), None);
+
+        let mut monitor = StreamMonitor::default();
+        for chunk in table.as_bytes().chunks(7) {
+            monitor.push(std::str::from_utf8(chunk).expect("ascii table"));
+        }
+        assert!(!monitor.detected());
     }
 
     #[test]

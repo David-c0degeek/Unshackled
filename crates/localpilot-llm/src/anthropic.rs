@@ -649,7 +649,11 @@ impl SseDecoder {
         let message = match reason {
             "end_turn" | "tool_use" => None,
             "max_tokens" => {
-                Some("provider stopped at max_tokens; output may be truncated".to_string())
+                self.warned_stop_reason = true;
+                out.push_back(Ok(ModelEvent::OutputLimit {
+                    message: "provider stopped at max_tokens; output may be truncated".to_string(),
+                }));
+                return;
             }
             "pause_turn" => Some(
                 "provider paused during server-tool processing; a continuation may be required"
@@ -781,7 +785,7 @@ mod tests {
         ]);
         assert!(events.iter().any(|e| matches!(
             e,
-            Ok(ModelEvent::ProviderWarning { message })
+            Ok(ModelEvent::OutputLimit { message })
                 if message.contains("max_tokens")
         )));
     }

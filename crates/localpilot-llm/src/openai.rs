@@ -666,6 +666,10 @@ impl SseDecoder {
             other => Some(format!("provider finished with reason `{other}`")),
         };
         if let Some(message) = message {
+            if reason == "length" {
+                out.push_back(Ok(ModelEvent::OutputLimit { message }));
+                return;
+            }
             out.push_back(Ok(ModelEvent::ProviderWarning { message }));
         }
     }
@@ -791,7 +795,7 @@ mod tests {
         ]);
         assert!(events.iter().any(|e| matches!(
             e,
-            Ok(ModelEvent::ProviderWarning { message })
+            Ok(ModelEvent::OutputLimit { message })
                 if message.contains("token limit")
         )));
     }

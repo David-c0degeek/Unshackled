@@ -29,6 +29,9 @@ pub enum ModelEvent {
     Usage(TokenUsage),
     /// A non-fatal provider warning.
     ProviderWarning { message: String },
+    /// The provider stopped because the configured output limit was reached.
+    /// Any streamed text before this event may be incomplete.
+    OutputLimit { message: String },
     /// The stream completed normally.
     Done,
 }

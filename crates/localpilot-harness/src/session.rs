@@ -730,6 +730,7 @@ impl SessionRuntime {
             let mut reasoning = String::new();
             let mut calls: Vec<(String, String, serde_json::Value)> = Vec::new();
             let mut stream_failed = false;
+            let mut output_limited = false;
             // Live degenerate-output guard, fed incrementally so a runaway
             // stream is aborted early without rescanning the whole turn.
             let mut monitor = StreamMonitor::default();
@@ -772,6 +773,10 @@ impl SessionRuntime {
                         Some(Ok(ModelEvent::ProviderWarning { message })) => {
                             let _ = events.send(RuntimeEvent::Warning(message));
                         }
+                        Some(Ok(ModelEvent::OutputLimit { message })) => {
+                            output_limited = true;
+                            let _ = events.send(RuntimeEvent::Warning(message));
+                        }
                         Some(Ok(ModelEvent::Done)) => break,
                         Some(Ok(_)) => {}
                         Some(Err(err)) => {
@@ -802,6 +807,12 @@ impl SessionRuntime {
                         },
                     }
                 }
+            }
+
+            if output_limited {
+                let message = "discarding partial response because the provider hit the output token limit; increase provider max_tokens or ask for a shorter answer".to_string();
+                let _ = events.send(RuntimeEvent::Warning(message));
+                return self.stop(events, StopReason::ProviderError);
             }
 
             // Bad-output detection and recovery.

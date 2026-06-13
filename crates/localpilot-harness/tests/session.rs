@@ -297,6 +297,34 @@ async fn degenerate_output_retries_without_tool_schemas() {
 }
 
 #[tokio::test]
+async fn output_limit_stop_discards_partial_reply() {
+    let provider = FakeProvider::new().script(vec![
+        Ok(ModelEvent::TextDelta("partial answer".to_string())),
+        Ok(ModelEvent::OutputLimit {
+            message: "provider stopped at max_tokens; output may be truncated".to_string(),
+        }),
+        Ok(ModelEvent::Done),
+    ]);
+    let mut h = build(provider, &[], SessionConfig::default());
+    let mut rx = h.events.subscribe();
+
+    let reason = h.runtime.run_turn("go", &h.events, &h.cancel).await;
+
+    assert_eq!(reason, StopReason::ProviderError);
+    assert!(drain(&mut rx).iter().any(|event| matches!(
+        event,
+        RuntimeEvent::Warning(message) if message.contains("discarding partial response")
+    )));
+    let events = h.store.read_events(h.runtime.session_id()).unwrap();
+    let transcript = serde_json::to_string(&localpilot_store::transcript_from_events(&events))
+        .expect("transcript serializes");
+    assert!(
+        !transcript.contains("partial answer"),
+        "output-limit text must not be persisted as a final assistant reply"
+    );
+}
+
+#[tokio::test]
 async fn update_plan_tool_emits_a_plan_event() {
     let provider = FakeProvider::new()
         .tool_call(
