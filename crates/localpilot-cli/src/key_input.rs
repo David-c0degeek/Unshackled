@@ -130,8 +130,10 @@ fn is_plain_enter(key: KeyEvent) -> bool {
 
 fn unmodified_char(key: KeyEvent) -> Option<char> {
     if key.modifiers.is_empty() {
-        if let KeyCode::Char(c) = key.code {
-            return Some(c);
+        match key.code {
+            KeyCode::Char(c) => return Some(c),
+            KeyCode::Enter => return Some('\n'),
+            _ => {}
         }
     }
     None

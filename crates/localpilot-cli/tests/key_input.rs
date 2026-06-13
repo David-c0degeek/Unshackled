@@ -99,20 +99,23 @@ fn mouse_tracking_off_writes_all_common_disable_sequences() {
 #[test]
 fn unbracketed_paste_newline_is_inserted_when_text_is_buffered() {
     let now = Instant::now();
-    let mut paste = key_input::UnbracketedPaste::default();
 
-    assert_eq!(
-        paste.observe_key(key(KeyCode::Char('a'), KeyModifiers::empty()), true, now),
-        key_input::UnbracketedPasteAction::None
-    );
-    assert_eq!(
-        paste.observe_key(
-            key(KeyCode::Char('\r'), KeyModifiers::empty()),
-            true,
-            now + Duration::from_millis(1)
-        ),
-        key_input::UnbracketedPasteAction::InsertNewline
-    );
+    for code in [KeyCode::Char('\r'), KeyCode::Char('\n'), KeyCode::Enter] {
+        let mut paste = key_input::UnbracketedPaste::default();
+
+        assert_eq!(
+            paste.observe_key(key(KeyCode::Char('a'), KeyModifiers::empty()), true, now),
+            key_input::UnbracketedPasteAction::None
+        );
+        assert_eq!(
+            paste.observe_key(
+                key(code, KeyModifiers::empty()),
+                true,
+                now + Duration::from_millis(1)
+            ),
+            key_input::UnbracketedPasteAction::InsertNewline
+        );
+    }
 }
 
 #[test]
@@ -169,12 +172,15 @@ fn crlf_unbracketed_paste_suppresses_the_lf_half() {
 #[test]
 fn standalone_char_newline_keeps_existing_submit_path() {
     let now = Instant::now();
-    let mut paste = key_input::UnbracketedPaste::default();
 
-    assert_eq!(
-        paste.observe_key(key(KeyCode::Char('\n'), KeyModifiers::empty()), false, now),
-        key_input::UnbracketedPasteAction::None
-    );
+    for code in [KeyCode::Char('\n'), KeyCode::Enter] {
+        let mut paste = key_input::UnbracketedPaste::default();
+
+        assert_eq!(
+            paste.observe_key(key(code, KeyModifiers::empty()), false, now),
+            key_input::UnbracketedPasteAction::None
+        );
+    }
 }
 
 #[test]
@@ -187,7 +193,11 @@ fn only_unmodified_chars_are_unbracketed_paste_candidates() {
         KeyCode::Char('\n'),
         KeyModifiers::empty()
     )));
-    assert!(!key_input::may_be_unbracketed_paste_key(key(
+    assert!(key_input::may_be_unbracketed_paste_key(key(
+        KeyCode::Enter,
+        KeyModifiers::empty()
+    )));
+    assert!(key_input::is_unbracketed_paste_newline_key(key(
         KeyCode::Enter,
         KeyModifiers::empty()
     )));
