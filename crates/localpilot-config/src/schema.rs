@@ -64,7 +64,7 @@ pub struct IngestConfig {
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             include: Vec::new(),
             exclude: Vec::new(),
             default_skip_dirs: [

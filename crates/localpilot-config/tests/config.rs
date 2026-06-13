@@ -372,7 +372,7 @@ fn ingest_config_defaults_are_conservative() -> TestResult {
     isolated(|_jail| {
         let cfg = load(&ConfigPaths::default(), &CliOverrides::default())?;
 
-        assert!(!cfg.ingest.enabled);
+        assert!(cfg.ingest.enabled);
         assert!(cfg.ingest.default_skip_dirs.contains(&"target".to_string()));
         assert!(cfg
             .ingest

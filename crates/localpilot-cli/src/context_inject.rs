@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use localpilot_config::{CliOverrides, ConfigPaths};
 use localpilot_harness::{ContextHook, SessionRuntime};
 
 /// LocalMind retrieval as a pre-turn context hook: relevant accepted project
@@ -10,6 +11,7 @@ use localpilot_harness::{ContextHook, SessionRuntime};
 /// — a retrieval miss or error contributes nothing and never fails the turn.
 pub struct LocalMindContext {
     root: PathBuf,
+    auto_ingest: bool,
 }
 
 impl ContextHook for LocalMindContext {
@@ -21,9 +23,7 @@ impl ContextHook for LocalMindContext {
         let accepted = localpilot_localmind::context_for(&self.root, prompt)
             .ok()
             .flatten();
-        let ingested = localpilot_localmind::ingest_context_for(&self.root, prompt)
-            .ok()
-            .flatten();
+        let ingested = self.ingested_context_for(prompt);
         match (accepted, ingested) {
             (Some(accepted), Some(ingested)) => Some(format!("{accepted}\n{ingested}")),
             (Some(accepted), None) => Some(accepted),
@@ -33,12 +33,49 @@ impl ContextHook for LocalMindContext {
     }
 }
 
+impl LocalMindContext {
+    fn ingested_context_for(&self, prompt: &str) -> Option<String> {
+        let config =
+            localpilot_config::load(&ConfigPaths::standard(&self.root), &CliOverrides::default())
+                .ok()?
+                .ingest;
+        if !config.enabled {
+            return None;
+        }
+        if self.auto_ingest && matches!(localpilot_localmind::ingest_status(&self.root), Ok(None)) {
+            let _ = localpilot_localmind::ingest_run(
+                &self.root,
+                &config,
+                localpilot_localmind::RunMode::Full,
+            );
+        }
+        localpilot_localmind::ingest_context_for(&self.root, prompt)
+            .ok()
+            .flatten()
+    }
+}
+
 /// Register the LocalMind context hook on a runtime.
 pub fn register(cwd: &Path, runtime: &mut SessionRuntime) {
     runtime
         .hooks_mut()
         .register_context_hook(Arc::new(LocalMindContext {
             root: cwd.to_path_buf(),
+            auto_ingest: false,
+        }));
+}
+
+/// Register LocalMind retrieval and allow one bounded first-use ingest pass.
+///
+/// This is intended for the trusted interactive REPL path. Non-interactive
+/// modes use [`register`] so a plain prompt never creates project files.
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
+pub fn register_auto_ingest(cwd: &Path, runtime: &mut SessionRuntime) {
+    runtime
+        .hooks_mut()
+        .register_context_hook(Arc::new(LocalMindContext {
+            root: cwd.to_path_buf(),
+            auto_ingest: true,
         }));
 }
 

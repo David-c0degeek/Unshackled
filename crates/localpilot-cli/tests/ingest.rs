@@ -66,6 +66,19 @@ fn ingest_lifecycle_and_knowledge_commands_work() {
 }
 
 #[test]
+fn ingest_run_works_with_default_config() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("README.md"), "parser guide\n").unwrap();
+
+    let ingested = run(dir.path(), &["ingest", "run"]);
+
+    assert!(ingested.contains("status: completed"));
+    assert!(ingested.contains("chunks:"));
+    let search = run(dir.path(), &["knowledge", "search", "parser"]);
+    assert!(search.contains("README.md"));
+}
+
+#[test]
 fn include_and_exclude_update_project_config() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("target")).unwrap();
