@@ -63,6 +63,21 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
+    /// Classify an error raised while reading an already-open response body.
+    ///
+    /// `reqwest` uses decode errors for invalid or truncated HTTP body framing,
+    /// so keep those in the stream-decode bucket instead of reporting them as
+    /// generic network failures.
+    #[must_use]
+    pub fn from_response_body_error(err: reqwest::Error) -> Self {
+        let message = format!("response body read failed after stream opened: {err}");
+        if err.is_decode() {
+            ProviderError::StreamDecode(message)
+        } else {
+            ProviderError::Network(message)
+        }
+    }
+
     /// The quota/rate-limit metadata carried by a [`RateLimit`](Self::RateLimit)
     /// or [`Quota`](Self::Quota) error, used to schedule a precise pause window.
     #[must_use]

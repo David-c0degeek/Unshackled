@@ -391,7 +391,7 @@ where
                 Some(Err(err)) => {
                     state
                         .queue
-                        .push_back(Err(ProviderError::Network(err.to_string())));
+                        .push_back(Err(ProviderError::from_response_body_error(err)));
                 }
                 None => {
                     state.decoder.finish(&mut state.queue);

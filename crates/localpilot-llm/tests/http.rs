@@ -145,6 +145,46 @@ async fn malformed_stream_body_yields_a_typed_decode_error() {
         .any(|e| matches!(e, Err(ProviderError::StreamDecode(_)))));
 }
 
+#[tokio::test]
+async fn response_body_decode_error_during_stream_is_not_reported_as_network() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((mut socket, _peer)) = listener.accept().await {
+            let mut request = [0_u8; 1024];
+            let _ = socket.read(&mut request).await;
+            let response = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "content-type: text/event-stream\r\n",
+                "transfer-encoding: chunked\r\n",
+                "\r\n",
+                "not-a-valid-chunk-size\r\n"
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        }
+    });
+
+    let events: Vec<_> = provider(format!("http://{addr}"))
+        .stream(request())
+        .await
+        .unwrap()
+        .collect()
+        .await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Err(ProviderError::StreamDecode(message))
+            if message.contains("response body read failed after stream opened")
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        Err(ProviderError::Network(message)) if message.contains("decoding response body")
+    )));
+}
+
 /// Boundary fixture: the exact stream shape LocalBox's gateway proxy emits
 /// for an Anthropic-format session (its own test suite pins the producer
 /// side). Characteristics the adapter must tolerate: think-stripped deltas

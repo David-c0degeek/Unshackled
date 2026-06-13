@@ -391,7 +391,7 @@ where
                 Some(Ok(bytes)) => state.decoder.push(bytes.as_ref(), &mut state.queue),
                 Some(Err(err)) => state
                     .queue
-                    .push_back(Err(ProviderError::Network(err.to_string()))),
+                    .push_back(Err(ProviderError::from_response_body_error(err))),
                 None => {
                     state.decoder.finish(&mut state.queue);
                     return state.queue.pop_front().map(|item| (item, state));
