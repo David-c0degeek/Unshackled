@@ -1339,6 +1339,7 @@ dependencies = [
 name = "localpilot-localmind"
 version = "0.3.0-beta.1"
 dependencies = [
+ "async-trait",
  "ignore",
  "localmind-codegraph",
  "localmind-core",
@@ -1346,11 +1347,15 @@ dependencies = [
  "localmind-store",
  "localpilot-config",
  "localpilot-core",
+ "localpilot-sandbox",
  "localpilot-store",
+ "localpilot-tools",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
 ]
 
