@@ -11,6 +11,7 @@
 mod codegraph;
 mod error;
 mod ingest;
+mod knowledge_tool;
 mod ops;
 mod pack;
 
@@ -31,6 +32,7 @@ pub use ingest::{
     ChunkRecord, ContextPack, IngestError, IngestJob, IngestReviewItem, JobStatus, KnowledgeHit,
     ManifestEntry, PreviewManifest, RunMode, RunSummary,
 };
+pub use knowledge_tool::KnowledgeSearch;
 pub use ops::{
     audit, context_for, memory_delete, memory_disable_injection, memory_injection_enabled,
     memory_list, promote, review_decide, review_list, review_show, search, skill_body, skill_show,

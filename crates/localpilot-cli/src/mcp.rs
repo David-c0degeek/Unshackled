@@ -1,4 +1,4 @@
-﻿//! Loading Model Context Protocol server tools into the session tool registry.
+//! Loading Model Context Protocol server tools into the session tool registry.
 //!
 //! Configured servers are launched as local subprocesses. Their tools are
 //! registered alongside the builtins and dispatched through the *same*
@@ -39,6 +39,11 @@ impl McpTools {
     #[must_use]
     pub fn registry(&self) -> ToolRegistry {
         let mut registry = ToolRegistry::with_builtins();
+        // The project knowledge base is reachable on demand as a read-only tool,
+        // so ingested knowledge is pulled when relevant instead of seeded into
+        // every turn. Harmless when no project is ingested (it returns an empty
+        // result), and present on every session path that builds a registry.
+        registry.register(Box::new(localpilot_localmind::KnowledgeSearch));
         for (descriptor, transport) in &self.entries {
             registry.register(Box::new(McpTool::new(
                 descriptor,
