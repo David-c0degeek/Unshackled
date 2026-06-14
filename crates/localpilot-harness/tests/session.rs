@@ -421,7 +421,7 @@ async fn manual_compaction_reports_noop_when_context_is_under_limit() {
     let mut h = build(provider, &[], SessionConfig::default());
     let before = h.runtime.context_usage();
 
-    let result = h.runtime.compact_conversation();
+    let result = h.runtime.compact_conversation().await;
 
     assert!(!result.compacted);
     assert_eq!(result.context_limit, before.1);
@@ -454,7 +454,7 @@ async fn manual_compaction_stores_a_summary_for_future_turns() {
         assert_eq!(reason, StopReason::Done);
     }
 
-    let result = h.runtime.compact_conversation();
+    let result = h.runtime.compact_conversation().await;
     assert!(result.compacted);
     assert!(result.context_used <= result.context_limit);
 
@@ -495,7 +495,7 @@ async fn clearing_after_manual_compaction_drops_the_compaction_summary() {
         let reason = h.runtime.run_turn(&prompt, &h.events, &h.cancel).await;
         assert_eq!(reason, StopReason::Done);
     }
-    assert!(h.runtime.compact_conversation().compacted);
+    assert!(h.runtime.compact_conversation().await.compacted);
 
     h.runtime.clear_conversation();
     let reason = h
@@ -541,7 +541,7 @@ async fn manual_compaction_keeps_tool_call_and_result_pairs_together() {
         assert_eq!(reason, StopReason::Done);
     }
 
-    let result = h.runtime.compact_conversation();
+    let result = h.runtime.compact_conversation().await;
     assert!(result.compacted);
 
     let reason = h

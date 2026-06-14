@@ -150,6 +150,16 @@ pub struct ChunkRecord {
     pub text: String,
     pub token_estimate: u64,
     pub stale: bool,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub redaction_status: String,
+    #[serde(default)]
+    pub original_bytes: u64,
+    #[serde(default)]
+    pub preview_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
 }
 
 /// Job state saved on disk.
@@ -199,6 +209,12 @@ pub struct KnowledgeHit {
     pub content_hash: String,
     pub stale: bool,
     pub snippet: String,
+    #[serde(default)]
+    pub token_estimate: u64,
+    #[serde(default)]
+    pub inclusion_reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
 }
 
 /// A task-specific context pack.
@@ -210,6 +226,14 @@ pub struct ContextPack {
     pub token_estimate: u64,
     pub chunks: Vec<KnowledgeHit>,
     pub exclusion_notes: Vec<String>,
+    #[serde(default)]
+    pub skipped_near_misses: Vec<KnowledgeHit>,
+    #[serde(default)]
+    pub accepted_memory_budget: u64,
+    #[serde(default)]
+    pub ingest_budget: u64,
+    #[serde(default)]
+    pub code_graph_budget: u64,
 }
 
 struct ChunkSpan {
@@ -385,6 +409,31 @@ pub fn run(
         }
         job.updated_unix = unix_now();
         write_json(&ingest_dir.join(JOB_FILE), &job)?;
+    }
+    if mode == RunMode::Refresh {
+        let current_keys: BTreeSet<String> = chunks
+            .iter()
+            .map(|chunk| format!("{}:{}", chunk.path, chunk.content_hash))
+            .collect();
+        let latest_hash_by_path: std::collections::BTreeMap<String, String> = manifest
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .content_hash
+                    .as_ref()
+                    .map(|hash| (entry.path.clone(), hash.clone()))
+            })
+            .collect();
+        for mut chunk in previous_chunks {
+            let key = format!("{}:{}", chunk.path, chunk.content_hash);
+            if current_keys.contains(&key) {
+                continue;
+            }
+            chunk.stale = true;
+            chunk.superseded_by = latest_hash_by_path.get(&chunk.path).cloned();
+            chunks.push(chunk);
+        }
     }
 
     if job.status == JobStatus::Running {
@@ -566,6 +615,9 @@ pub fn search(project_root: &Path, query: &str) -> Result<Vec<KnowledgeHit>, Ing
             content_hash: chunk.content_hash,
             stale: chunk.stale,
             snippet: summarize_snippet(&chunk.text, &terms),
+            token_estimate: chunk.token_estimate,
+            inclusion_reason: "query term match".to_string(),
+            skip_reason: None,
         });
     }
     hits.sort_by(|a, b| {
@@ -590,13 +642,30 @@ pub fn build_pack(
     let ingest_dir = root.join(INGEST_DIR);
     let mut token_estimate = 0_u64;
     let mut chunks = Vec::new();
+    let mut skipped_near_misses = Vec::new();
+    let mut seen_hashes = BTreeSet::new();
     for hit in search(&root, task)? {
         let chunk = find_chunk(&ingest_dir, &hit.chunk_id)?;
+        if !seen_hashes.insert(chunk.content_hash.clone()) {
+            let mut skipped = hit;
+            skipped.skip_reason = Some("duplicate content hash".to_string());
+            skipped_near_misses.push(skipped);
+            continue;
+        }
         if token_estimate.saturating_add(chunk.token_estimate) > token_budget {
+            let mut skipped = hit;
+            skipped.skip_reason = Some("token budget exceeded".to_string());
+            skipped_near_misses.push(skipped);
             continue;
         }
         token_estimate = token_estimate.saturating_add(chunk.token_estimate);
-        chunks.push(hit);
+        let mut selected = hit;
+        selected.inclusion_reason = if selected.stale {
+            "query match retained as stale context".to_string()
+        } else {
+            "query match within budget".to_string()
+        };
+        chunks.push(selected);
     }
     let exclusion_notes = if ingest_dir.join(MANIFEST_FILE).exists() {
         skipped(&root)?
@@ -622,6 +691,10 @@ pub fn build_pack(
         token_estimate,
         chunks,
         exclusion_notes,
+        skipped_near_misses: skipped_near_misses.into_iter().take(10).collect(),
+        accepted_memory_budget: token_budget / 4,
+        ingest_budget: token_budget / 2,
+        code_graph_budget: token_budget / 4,
     };
     write_json(&ingest_dir.join(PACK_FILE), &pack)?;
     Ok(pack)
@@ -966,8 +1039,13 @@ fn push_chunk(
         end_byte: span.end_byte,
         content_hash: content_hash.to_string(),
         token_estimate: estimate_tokens(redacted.len() as u64),
+        summary: summarize_chunk(path, &redacted),
+        redaction_status: "redacted".to_string(),
+        original_bytes: text.len() as u64,
+        preview_bytes: redacted.len() as u64,
         text: redacted,
         stale: false,
+        superseded_by: None,
     });
 }
 
@@ -1101,6 +1179,21 @@ fn summarize_snippet(text: &str, terms: &[String]) -> String {
         .join(" ")
         .trim()
         .to_string()
+}
+
+fn summarize_chunk(path: &str, text: &str) -> String {
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("empty chunk");
+    let first = if first.chars().count() > 160 {
+        let truncated: String = first.chars().take(160).collect();
+        format!("{truncated}...")
+    } else {
+        first.to_string()
+    };
+    format!("{path}: {first}")
 }
 
 fn is_heavy_or_generated(relative: &Path, config: &IngestConfig) -> bool {

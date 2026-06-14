@@ -72,6 +72,10 @@ pub async fn run(
             interactivity: Interactivity::Interactive,
             trusted: profile == Profile::Bypass,
             context_token_limit,
+            compaction_mode: compaction_mode(config.compaction.mode),
+            summarizer_tuning: localpilot_harness::SummarizerTuning::from_config(
+                &config.compaction,
+            ),
             ..SessionConfig::default()
         },
         Vec::new(),
@@ -106,6 +110,17 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+fn compaction_mode(mode: localpilot_config::CompactionMode) -> localpilot_harness::CompactionMode {
+    match mode {
+        localpilot_config::CompactionMode::Deterministic => {
+            localpilot_harness::CompactionMode::Deterministic
+        }
+        localpilot_config::CompactionMode::SmartWithFallback => {
+            localpilot_harness::CompactionMode::SmartWithFallback
+        }
+    }
 }
 
 fn profile_label(profile: Profile) -> &'static str {

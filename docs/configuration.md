@@ -58,6 +58,15 @@ LocalPilot-owned switches `suppress_thinking` and `reasoning_round_trip`). See
 | `test_command` | string | none | Command run to gate step completion |
 | `rules.<name>` | `off` \| `warn` \| `block` | — | Per-rule severity overrides |
 
+### `[compaction]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `mode` | `deterministic` \| `smart_with_fallback` | `deterministic` | Runtime context compaction mode. `smart_with_fallback` keeps deterministic compaction as the completed-only fallback when no validated summarizer backend is available |
+| `summary_token_limit` | int | `1024` | Target maximum size for rendered compact summaries |
+| `summarizer_input_tokens` | int | `8192` | Reserved input budget for model-backed summarization when enabled |
+| `summarizer_timeout_secs` | int | `20` | Timeout budget for a future model-backed summarizer call |
+
 ### `[permissions]`
 
 | Key | Type | Default | Meaning |
@@ -102,6 +111,9 @@ model = "qwen2.5-coder"
 [harness]
 mode = "agent"
 test_command = "cargo test"
+
+[compaction]
+mode = "deterministic"
 
 [permissions]
 profile = "default"

@@ -24,10 +24,14 @@ use localpilot_tools::{ToolContext, ToolRegistry};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use crate::compaction::{compact_with_summary, estimate_tokens, CompactionResult};
+use crate::compaction::{
+    apply_smart_digest, compact_plan, estimate_tokens, CompactionMetadata, CompactionMode,
+    CompactionResult,
+};
 use crate::hooks::{HookEvent, HookFabric};
 use crate::quality::{CheckOutcome, CheckRunner};
 use crate::rules::{trigger_for_cadence, Trigger};
+use crate::summarizer::{FallbackReason, ProviderSummarizer, Summarizer, SummarizerTuning};
 
 /// Why a turn loop stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +91,7 @@ pub struct PlanStep {
 }
 
 /// Result of manually compacting the runtime message history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualCompaction {
     /// Whether older messages were removed and summarized.
     pub compacted: bool,
@@ -95,6 +99,12 @@ pub struct ManualCompaction {
     pub context_used: usize,
     /// Configured context limit used for the operation.
     pub context_limit: usize,
+    /// Requested compaction mode.
+    pub requested_mode: CompactionMode,
+    /// Mode that produced the final projection.
+    pub used_mode: CompactionMode,
+    /// Deterministic fallback reason, if a smart attempt did not take effect.
+    pub fallback_reason: Option<String>,
 }
 
 /// Tuning for a session.
@@ -110,6 +120,10 @@ pub struct SessionConfig {
     /// How many times to retry a transient connection failure (network or
     /// 5xx) before giving up, with exponential backoff between attempts.
     pub max_stream_retries: u32,
+    /// Runtime context compaction mode.
+    pub compaction_mode: CompactionMode,
+    /// Budgets and timeout for an optional model-backed smart summarizer.
+    pub summarizer_tuning: SummarizerTuning,
 }
 
 impl Default for SessionConfig {
@@ -121,6 +135,8 @@ impl Default for SessionConfig {
             context_token_limit: 24_000,
             reasoning_effort: None,
             max_stream_retries: 3,
+            compaction_mode: CompactionMode::Deterministic,
+            summarizer_tuning: SummarizerTuning::default(),
         }
     }
 }
@@ -246,6 +262,9 @@ pub struct SessionRuntime {
     hooks: HookFabric,
     /// Per-tool failure counts within the current turn.
     tool_failure_guard: ToolFailureGuard,
+    /// Optional injected smart summarizer. When unset and smart mode is active,
+    /// a provider-backed summarizer is built on demand from `provider`.
+    summarizer: Option<Arc<dyn Summarizer>>,
 }
 
 impl SessionRuntime {
@@ -288,6 +307,7 @@ impl SessionRuntime {
             steer: SteerQueue::default(),
             hooks: HookFabric::default(),
             tool_failure_guard: ToolFailureGuard::default(),
+            summarizer: None,
         };
         runtime.record_event(SessionEventKind::SessionOpened {
             reason: OpenReason::New,
@@ -515,18 +535,47 @@ impl SessionRuntime {
         self.history_generation += 1;
     }
 
+    /// Inject a smart summarizer backend. When set and smart mode is active, it
+    /// is preferred over the provider-backed summarizer built on demand. Mainly
+    /// for tests and hosts that want a dedicated summarization model.
+    pub fn set_summarizer(&mut self, summarizer: Arc<dyn Summarizer>) {
+        self.summarizer = Some(summarizer);
+    }
+
+    /// The active summarizer for smart-mode compaction, if any: the injected one
+    /// when present, otherwise a provider-backed summarizer over the session's
+    /// model. `None` when smart mode is not configured.
+    fn active_summarizer(&self) -> Option<Arc<dyn Summarizer>> {
+        if self.config.compaction_mode != CompactionMode::SmartWithFallback {
+            return None;
+        }
+        if let Some(summarizer) = &self.summarizer {
+            return Some(Arc::clone(summarizer));
+        }
+        Some(Arc::new(ProviderSummarizer::new(
+            Arc::clone(&self.provider),
+            self.config.model.clone(),
+        )))
+    }
+
     /// Compact the stored runtime message history using the same rules applied
     /// before automatic provider requests.
-    #[must_use]
-    pub fn compact_conversation(&mut self) -> ManualCompaction {
-        let result = self.compacted_history();
+    pub async fn compact_conversation(&mut self) -> ManualCompaction {
+        let cancel = CancellationToken::new();
+        let result = self.compacted_history(&cancel).await;
         let context_used = estimate_tokens(&result.messages);
+        let fallback_reason = result.metadata.fallback_reason.clone();
+        let (requested_mode, used_mode) =
+            (result.metadata.requested_mode, result.metadata.used_mode);
         self.messages = result.messages;
         self.history_generation += 1;
         ManualCompaction {
             compacted: result.compacted,
             context_used,
             context_limit: self.config.context_token_limit,
+            requested_mode,
+            used_mode,
+            fallback_reason,
         }
     }
 
@@ -535,17 +584,21 @@ impl SessionRuntime {
     /// estimate undercounts some payloads (large tool outputs in particular), so
     /// a model's real tokenizer can reject a request the budget believes fits;
     /// this lets the user shrink the conversation on demand and keep going.
-    #[must_use]
-    pub fn compact_conversation_force(&mut self) -> ManualCompaction {
+    pub async fn compact_conversation_force(&mut self) -> ManualCompaction {
         let target = (self.config.context_token_limit / 2).max(FORCE_COMPACT_FLOOR);
-        let result = compact_with_summary(self.messages.clone(), target);
+        let cancel = CancellationToken::new();
+        let result = self.compact_candidate(target, &cancel).await;
         if result.compacted {
             if let Some(summary) = result.summary.clone() {
                 self.record_event(SessionEventKind::Compacted { summary });
             }
+            self.record_compaction_attempt("completed", &result.metadata);
             self.hooks.notify(&HookEvent::Compacted);
         }
         let context_used = estimate_tokens(&result.messages);
+        let fallback_reason = result.metadata.fallback_reason.clone();
+        let (requested_mode, used_mode) =
+            (result.metadata.requested_mode, result.metadata.used_mode);
         self.messages = result.messages;
         self.history_generation += 1;
         self.compaction_cache = None;
@@ -553,6 +606,9 @@ impl SessionRuntime {
             compacted: result.compacted,
             context_used,
             context_limit: self.config.context_token_limit,
+            requested_mode,
+            used_mode,
+            fallback_reason,
         }
     }
 
@@ -679,21 +735,80 @@ impl SessionRuntime {
 
     /// Compact the live history for the next request, reusing the cached
     /// result while the history is unchanged.
-    fn compacted_history(&mut self) -> CompactionResult {
+    async fn compacted_history(&mut self, cancel: &CancellationToken) -> CompactionResult {
         if let Some((generation, cached)) = &self.compaction_cache {
             if *generation == self.history_generation {
                 return cached.clone();
             }
         }
-        let result = compact_with_summary(self.messages.clone(), self.config.context_token_limit);
+        let result = self
+            .compact_candidate(self.config.context_token_limit, cancel)
+            .await;
         if result.compacted {
             if let Some(summary) = result.summary.clone() {
                 self.record_event(SessionEventKind::Compacted { summary });
             }
+            self.record_compaction_attempt("completed", &result.metadata);
             self.hooks.notify(&HookEvent::Compacted);
         }
         self.compaction_cache = Some((self.history_generation, result.clone()));
         result
+    }
+
+    /// Build the deterministic projection, then — in smart mode — make one
+    /// bounded summarization attempt and adopt it only on completed-only
+    /// cutover. Any smart failure leaves the deterministic projection in force
+    /// with a typed fallback reason recorded for audit.
+    async fn compact_candidate(
+        &self,
+        token_limit: usize,
+        cancel: &CancellationToken,
+    ) -> CompactionResult {
+        let plan = compact_plan(self.messages.clone(), token_limit);
+        let mut result = plan.result;
+        result.metadata.requested_mode = self.config.compaction_mode;
+        if !result.compacted {
+            return result;
+        }
+        let Some(summarizer) = self.active_summarizer() else {
+            return result;
+        };
+        if plan.dropped.is_empty() {
+            result.metadata.used_mode = CompactionMode::Deterministic;
+            result.metadata.fallback_reason =
+                Some(FallbackReason::NothingToSummarize.as_str().to_string());
+            return result;
+        }
+        match summarizer
+            .summarize(
+                &plan.dropped,
+                &plan.carried,
+                self.config.summarizer_tuning,
+                cancel,
+            )
+            .await
+        {
+            Ok(smart) => apply_smart_digest(result, &plan.dropped, smart, token_limit),
+            Err(reason) => {
+                result.metadata.used_mode = CompactionMode::Deterministic;
+                result.metadata.fallback_reason = Some(reason.as_str().to_string());
+                result
+            }
+        }
+    }
+
+    fn record_compaction_attempt(&mut self, state: &str, metadata: &CompactionMetadata) {
+        self.record_event(SessionEventKind::CompactionAttempt {
+            requested_mode: compaction_mode_label(metadata.requested_mode).to_string(),
+            used_mode: compaction_mode_label(metadata.used_mode).to_string(),
+            state: state.to_string(),
+            dropped_exchanges: metadata.dropped_exchanges,
+            kept_messages: metadata.kept_messages,
+            dropped_messages: metadata.dropped_messages,
+            digest_estimate_tokens: metadata.digest_estimate_tokens,
+            fallback_reason: metadata.fallback_reason.clone(),
+            truncated_tool_results: metadata.truncated_tool_results,
+        });
     }
 
     /// Run one user turn to completion. Streaming and tool execution are
@@ -726,7 +841,7 @@ impl SessionRuntime {
                 self.append(Message::text(Role::User, steer_text));
             }
 
-            let compacted = self.compacted_history();
+            let compacted = self.compacted_history(cancel).await;
             let used = estimate_tokens(&compacted.messages);
             let _ = events.send(RuntimeEvent::ContextUsage {
                 used,
@@ -1157,6 +1272,13 @@ fn invalid_tool_calls(calls: &[(String, String, serde_json::Value)]) -> Option<S
 
 fn stream_error_stops_turn(err: &ProviderError) -> bool {
     !matches!(err, ProviderError::StreamDecode(_))
+}
+
+fn compaction_mode_label(mode: CompactionMode) -> &'static str {
+    match mode {
+        CompactionMode::Deterministic => "deterministic",
+        CompactionMode::SmartWithFallback => "smart_with_fallback",
+    }
 }
 
 fn is_compaction_summary(message: &Message) -> bool {

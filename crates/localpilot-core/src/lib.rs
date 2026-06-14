@@ -19,6 +19,9 @@ pub use error::CoreError;
 pub use id::{EventId, MessageId, SessionId, ToolUseId, TurnId};
 pub use message::{ContentBlock, Message, MessageMetadata, Role};
 pub use secret::Secret;
-pub use summary::StructuredSummary;
+pub use summary::{
+    StructuredSummary, SummaryBudget, SummarySection, SummarySectionKind, SummarySource,
+    SummarySourceKind, STRUCTURED_SUMMARY_SCHEMA_VERSION,
+};
 pub use tool::{ToolCall, ToolResult};
 pub use usage::{TokenUsage, UsageSummary};

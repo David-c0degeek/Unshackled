@@ -18,6 +18,7 @@ pub struct Config {
     pub quota: QuotaConfig,
     pub mcp: McpConfig,
     pub ingest: IngestConfig,
+    pub compaction: CompactionConfig,
 }
 
 impl Default for Config {
@@ -30,8 +31,45 @@ impl Default for Config {
             quota: QuotaConfig::default(),
             mcp: McpConfig::default(),
             ingest: IngestConfig::default(),
+            compaction: CompactionConfig::default(),
         }
     }
+}
+
+/// Runtime context compaction configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionConfig {
+    /// Default is deterministic. `smart_with_fallback` is accepted as an opt-in
+    /// contract and falls back deterministically when no summarizer backend is
+    /// configured.
+    pub mode: CompactionMode,
+    /// Maximum summary size target for smart/deterministic digest rendering.
+    pub summary_token_limit: u64,
+    /// Maximum input budget for model-backed summarization when enabled.
+    pub summarizer_input_tokens: u64,
+    /// Timeout for a future model-backed summarizer call.
+    pub summarizer_timeout_secs: u64,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            mode: CompactionMode::default(),
+            summary_token_limit: 1_024,
+            summarizer_input_tokens: 8_192,
+            summarizer_timeout_secs: 20,
+        }
+    }
+}
+
+/// Requested runtime compaction mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionMode {
+    #[default]
+    Deterministic,
+    SmartWithFallback,
 }
 
 /// Project-local folder ingestion configuration.

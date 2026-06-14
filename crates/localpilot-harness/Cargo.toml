@@ -9,6 +9,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
 serde = { workspace = true }
@@ -27,6 +28,7 @@ localpilot-store = { path = "../localpilot-store" }
 localpilot-tools = { path = "../localpilot-tools" }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

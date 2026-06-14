@@ -17,11 +17,14 @@ mod quality;
 mod resume;
 mod rules;
 mod session;
+mod summarizer;
 mod system_prompt;
 mod worker;
 
 pub use brief::Brief;
-pub use compaction::{compact, compact_with_summary, estimate_tokens};
+pub use compaction::{
+    compact, compact_with_summary, estimate_tokens, CompactionMetadata, CompactionMode,
+};
 pub use decisions::{today, Decision, Decisions};
 pub use error::HarnessError;
 pub use hooks::{ContextHook, HookEvent, HookFabric, SessionObserver};
@@ -38,6 +41,7 @@ pub use session::{
     effective_context_limit, ManualCompaction, PlanStep, RuntimeEvent, SessionConfig,
     SessionRuntime, SteerQueue, StopReason,
 };
+pub use summarizer::{FallbackReason, ProviderSummarizer, Summarizer, SummarizerTuning};
 pub use system_prompt::agent_system_prompt;
 // Part of the public `RuntimeEvent::Recovery` payload, so consumers can match it.
 pub use localpilot_recovery::ModelHealth;

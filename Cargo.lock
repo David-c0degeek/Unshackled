@@ -1294,6 +1294,7 @@ dependencies = [
 name = "localpilot-harness"
 version = "0.3.0-beta.1"
 dependencies = [
+ "async-trait",
  "futures",
  "indexmap",
  "insta",

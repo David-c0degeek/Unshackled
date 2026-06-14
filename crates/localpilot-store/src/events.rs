@@ -117,6 +117,20 @@ pub enum SessionEventKind {
     Compacted {
         summary: StructuredSummary,
     },
+    /// A compaction attempt was audited. This metadata is safe to persist: it
+    /// carries counts, modes, and source-grounded digest metadata, not raw
+    /// transcript dumps.
+    CompactionAttempt {
+        requested_mode: String,
+        used_mode: String,
+        state: String,
+        dropped_exchanges: usize,
+        kept_messages: usize,
+        dropped_messages: usize,
+        digest_estimate_tokens: usize,
+        fallback_reason: Option<String>,
+        truncated_tool_results: usize,
+    },
     StepStarted {
         number: usize,
         description: String,
@@ -287,6 +301,17 @@ mod tests {
             SessionEventKind::QuotaResumed,
             SessionEventKind::Compacted {
                 summary: StructuredSummary::new("trimmed:", vec!["x".to_string()]),
+            },
+            SessionEventKind::CompactionAttempt {
+                requested_mode: "deterministic".to_string(),
+                used_mode: "deterministic".to_string(),
+                state: "completed".to_string(),
+                dropped_exchanges: 1,
+                kept_messages: 2,
+                dropped_messages: 3,
+                digest_estimate_tokens: 4,
+                fallback_reason: None,
+                truncated_tool_results: 0,
             },
             SessionEventKind::StepStarted {
                 number: 1,

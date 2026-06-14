@@ -472,6 +472,8 @@ where
                 provider.declaration().max_context_tokens,
                 config.harness.context_token_limit,
             ),
+            compaction_mode(config.compaction.mode),
+            localpilot_harness::SummarizerTuning::from_config(&config.compaction),
             gate_allowance.clone(),
             (run.approver)(),
         );
@@ -646,6 +648,8 @@ fn build_runtime(
     model: &str,
     mcp: &crate::mcp::McpTools,
     context_token_limit: usize,
+    compaction_mode: localpilot_harness::CompactionMode,
+    summarizer_tuning: localpilot_harness::SummarizerTuning,
     allowlist: Vec<String>,
     approver: Box<dyn Approver>,
 ) -> SessionRuntime {
@@ -662,10 +666,23 @@ fn build_runtime(
             interactivity,
             trusted,
             context_token_limit,
+            compaction_mode,
+            summarizer_tuning,
             ..SessionConfig::default()
         },
         Vec::new(),
     )
+}
+
+fn compaction_mode(mode: localpilot_config::CompactionMode) -> localpilot_harness::CompactionMode {
+    match mode {
+        localpilot_config::CompactionMode::Deterministic => {
+            localpilot_harness::CompactionMode::Deterministic
+        }
+        localpilot_config::CompactionMode::SmartWithFallback => {
+            localpilot_harness::CompactionMode::SmartWithFallback
+        }
+    }
 }
 
 fn repo_summary(root: &Path) -> String {

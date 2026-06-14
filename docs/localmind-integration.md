@@ -67,6 +67,10 @@ depends on LocalMind, never the reverse.
   candidates, and task context packs. Normal turns may receive compact
   high-ranking ingested chunks as local context, but that context is not accepted
   memory. Promotion from ingestion enqueues LocalMind review items first.
+- Context compaction manages the active model projection only. It can emit a
+  structured, source-grounded runtime digest and safe audit metadata, but it
+  does not write accepted memory, create skill drafts, or enqueue LocalMind
+  review items.
 
 State is project-local under `.localmind/`. Durable memory is readable Markdown;
 queue, audit, search index, and the code-structure graph live in SQLite.
@@ -98,6 +102,20 @@ survive. The engine also exposes transport-agnostic MCP tool contracts
 
 All capture stays redacted-before-persistence and inside the permission boundary;
 LocalMind never bypasses either.
+
+## Derived Context Metadata
+
+Compaction digests, ingestion chunks, and task context packs use the same
+vocabulary: goal, constraints, progress, decisions, next steps, critical
+context, relevant files, command/failure outcomes, unresolved risks, and
+stale/superseded facts. Derived records carry source hints, redaction status,
+content hashes where available, token estimates, and inclusion or skip reasons.
+
+The session event log stores compaction attempt metadata with mode, fallback
+reason, dropped/kept counts, digest estimate, and truncation count. It does not
+store raw dropped transcript content. Ingest refresh keeps superseded chunks
+marked stale so retrieval can prefer newer evidence while audit remains
+explainable.
 
 ## Commands
 

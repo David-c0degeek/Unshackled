@@ -175,6 +175,10 @@ pub async fn run_chat(
                 context_window,
                 config.harness.context_token_limit,
             ),
+            compaction_mode: compaction_mode(config.compaction.mode),
+            summarizer_tuning: localpilot_harness::SummarizerTuning::from_config(
+                &config.compaction,
+            ),
             ..SessionConfig::default()
         },
         Vec::new(),
@@ -454,28 +458,39 @@ async fn run_slash(
         }
         SlashAction::Compact { force } => {
             let summary = if force {
-                runtime.compact_conversation_force()
+                runtime.compact_conversation_force().await
             } else {
-                runtime.compact_conversation()
+                runtime.compact_conversation().await
             };
             state.apply(UiEvent::ContextUsage {
                 context_used: summary.context_used,
                 context_limit: summary.context_limit,
             });
             let notice = if summary.compacted {
+                let fallback = summary
+                    .fallback_reason
+                    .map(|reason| format!("; fallback: {reason}"))
+                    .unwrap_or_default();
                 format!(
-                    "compacted conversation history; context {}/{}",
-                    summary.context_used, summary.context_limit
+                    "compacted conversation history using {}; context {}/{}{}",
+                    harness_compaction_mode_label(summary.used_mode),
+                    summary.context_used,
+                    summary.context_limit,
+                    fallback
                 )
             } else if force {
                 format!(
-                    "nothing left to compact; context {}/{}",
-                    summary.context_used, summary.context_limit
+                    "nothing left to compact using {}; context {}/{}",
+                    harness_compaction_mode_label(summary.requested_mode),
+                    summary.context_used,
+                    summary.context_limit
                 )
             } else {
                 format!(
-                    "conversation already compact enough; context {}/{}",
-                    summary.context_used, summary.context_limit
+                    "conversation already compact enough using {}; context {}/{}",
+                    harness_compaction_mode_label(summary.requested_mode),
+                    summary.context_used,
+                    summary.context_limit
                 )
             };
             state.apply(UiEvent::Notice(notice));
@@ -1196,6 +1211,24 @@ async fn discovered_window(
         .into_iter()
         .find(|m| m.id == model)
         .and_then(|m| m.context_window)
+}
+
+fn compaction_mode(mode: localpilot_config::CompactionMode) -> localpilot_harness::CompactionMode {
+    match mode {
+        localpilot_config::CompactionMode::Deterministic => {
+            localpilot_harness::CompactionMode::Deterministic
+        }
+        localpilot_config::CompactionMode::SmartWithFallback => {
+            localpilot_harness::CompactionMode::SmartWithFallback
+        }
+    }
+}
+
+fn harness_compaction_mode_label(mode: localpilot_harness::CompactionMode) -> &'static str {
+    match mode {
+        localpilot_harness::CompactionMode::Deterministic => "deterministic",
+        localpilot_harness::CompactionMode::SmartWithFallback => "smart_with_fallback",
+    }
 }
 
 fn enter_terminal(capture_mouse: bool) -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {

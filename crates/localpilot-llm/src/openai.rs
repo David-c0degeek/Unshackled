@@ -469,6 +469,7 @@ struct SseDecoder {
     last_keyless: Option<ToolKey>,
     warned_finish_reasons: BTreeSet<String>,
     saw_finish_reason: bool,
+    output_limited: bool,
     done: bool,
 }
 
@@ -501,7 +502,11 @@ impl SseDecoder {
             }
         }
         self.flush_thinking(out);
-        self.flush_tools(out);
+        if !self.output_limited {
+            self.flush_tools(out);
+        } else {
+            self.discard_tools();
+        }
         if !self.done {
             if self.saw_finish_reason {
                 self.emit_done(out);
@@ -586,6 +591,10 @@ impl SseDecoder {
             }
             if let Some(reason) = choice["finish_reason"].as_str() {
                 self.saw_finish_reason = true;
+                if reason == "length" {
+                    self.output_limited = true;
+                    self.discard_tools();
+                }
                 if reason == "tool_calls" {
                     self.flush_tools(out);
                 }
@@ -645,6 +654,11 @@ impl SseDecoder {
                 input_json,
             }));
         }
+    }
+
+    fn discard_tools(&mut self) {
+        self.tools.clear();
+        self.last_keyless = None;
     }
 
     fn warn_for_finish_reason(&mut self, reason: &str, out: &mut EventQueue) {
@@ -798,6 +812,27 @@ mod tests {
             Ok(ModelEvent::OutputLimit { message })
                 if message.contains("token limit")
         )));
+    }
+
+    #[test]
+    fn length_finish_discards_partial_tool_arguments_without_decode_error() {
+        let events = collect_sse(&[
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n",
+            "data: [DONE]\n",
+        ]);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Ok(ModelEvent::OutputLimit { message }) if message.contains("token limit")
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            Err(ProviderError::StreamDecode(message)) if message.contains("tool arguments")
+        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, Ok(ModelEvent::ToolCall { .. }))));
     }
 
     #[test]

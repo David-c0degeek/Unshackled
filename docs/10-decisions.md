@@ -2,6 +2,37 @@
 
 This file starts the decision log. Add new records at the top.
 
+## ADR-0014: Context Projection Is Runtime-Only And Audit-First
+
+Status: accepted
+
+Runtime compaction, derived ingest packs, accepted memory retrieval, and code
+graph facts all contribute to the active model request, but they keep distinct
+ownership and lifetime boundaries. Compaction rewrites only the active runtime
+projection; it may persist source-grounded summary and attempt metadata in the
+session event log, but it does not write accepted memory, skill drafts, review
+items, or ingestion artifacts.
+
+Consequences:
+
+- Compaction cutover is completed-only: a candidate projection must pass
+  pairing, budget, and digest validation before it becomes active.
+- The deterministic compactor is the correctness baseline. Smart modes must
+  report fallback reasons and leave a valid deterministic projection.
+- Compaction audit events store mode, fallback reason, counts, estimates, and
+  truncation metadata without raw dropped transcript dumps.
+- Ingestion remains rebuildable `.localmind/ingest/` state, and accepted memory
+  remains LocalMind review-gated state.
+
+Reason:
+
+- Treating runtime context as memory would silently teach LocalMind unreviewed
+  facts and weaken ADR-0011.
+- Provider output-limit and partial tool-call failures require atomic request
+  projection, not in-place mutation of transcript history.
+- Shared source hints and budget metadata make context decisions inspectable
+  without leaking private plan state or raw oversized content.
+
 ## ADR-0013: Folder Ingestion Uses Disposable Project-Local Artifacts
 
 Status: accepted
