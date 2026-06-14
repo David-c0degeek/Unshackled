@@ -673,6 +673,7 @@ pub fn build_pack(
             recency: 0,
             file_match,
             confidence: 0.5,
+            graph_proximity: 0,
         });
         hit_by_id.insert(hit.chunk_id.clone(), hit);
     }
@@ -692,8 +693,67 @@ pub fn build_pack(
                 file_match,
                 // Accepted memory is review-gated, so it carries full confidence.
                 confidence: 1.0,
+                graph_proximity: 0,
             });
         }
+    }
+
+    // Code-graph neighbors of task-relevant symbols compete as a source. The
+    // symbol itself is proximity 0; its direct neighbors are proximity 1.
+    for symbol in task_symbols(task) {
+        let Ok(report) = crate::codegraph::codegraph_inspect(&root, &symbol) else {
+            continue;
+        };
+        let path = report.path.clone();
+        let file_match = path
+            .as_deref()
+            .is_some_and(|p| task_names_path(&task_lower, p));
+        candidates.push(PackCandidate {
+            source: PackSource::CodeGraph,
+            id: format!("graph:{symbol}"),
+            path: path.clone(),
+            score: 8,
+            token_estimate: (report.qualified_name.chars().count() as u64 / 4).max(1),
+            snippet: format!("{} {}", report.kind, report.qualified_name),
+            stale: false,
+            recency: 0,
+            file_match,
+            confidence: 0.8,
+            graph_proximity: 0,
+        });
+        for (index, neighbor) in report.neighbors.iter().enumerate().take(8) {
+            candidates.push(PackCandidate {
+                source: PackSource::CodeGraph,
+                id: format!("graph:{symbol}:{index}"),
+                path: path.clone(),
+                score: 5,
+                token_estimate: (neighbor.chars().count() as u64 / 4).max(1),
+                snippet: neighbor.clone(),
+                stale: false,
+                recency: 0,
+                file_match,
+                confidence: 0.6,
+                graph_proximity: 1,
+            });
+        }
+    }
+
+    // Recent session facts come from the most recent LocalMind session summary.
+    for (index, fact) in recent_session_facts(&root).into_iter().enumerate() {
+        candidates.push(PackCandidate {
+            source: PackSource::RecentSession,
+            id: format!("session:{index}"),
+            path: None,
+            score: 8,
+            token_estimate: (fact.chars().count() as u64 / 4).max(1),
+            snippet: fact,
+            stale: false,
+            // All from the latest session, so they share a high recency rank.
+            recency: 40,
+            file_match: false,
+            confidence: 0.8,
+            graph_proximity: 0,
+        });
     }
 
     let allocation = allocate(candidates, token_budget);
@@ -761,6 +821,65 @@ pub fn build_pack(
     };
     write_json(&ingest_dir.join(PACK_FILE), &pack)?;
     Ok(pack)
+}
+
+/// Identifier-like tokens from a task query that may name code-graph symbols.
+/// Common English words are dropped; at most three are probed so a pack build
+/// never fans out into the graph.
+fn task_symbols(task: &str) -> Vec<String> {
+    const STOP: &[&str] = &[
+        "the", "and", "for", "with", "fix", "add", "use", "run", "this", "that", "into", "from",
+        "make", "test", "code", "file", "files", "function", "please", "update", "change",
+    ];
+    let mut seen = BTreeSet::new();
+    task.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .filter(|token| token.len() >= 3 && token.chars().any(|c| c.is_ascii_alphabetic()))
+        .filter(|token| !STOP.contains(&token.to_ascii_lowercase().as_str()))
+        .filter(|token| seen.insert(token.to_ascii_lowercase()))
+        .take(3)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Key points from the most recent LocalMind session summary, used as
+/// recent-session retrieval candidates. Best-effort: a missing or malformed
+/// summary yields none.
+fn recent_session_facts(root: &Path) -> Vec<String> {
+    let sessions_dir = root.join(".localmind").join("sessions");
+    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+        return Vec::new();
+    };
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in entries.flatten() {
+        let summary = entry.path().join("summary.json");
+        let Ok(modified) = summary.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if newest.as_ref().is_none_or(|(at, _)| modified > *at) {
+            newest = Some((modified, summary));
+        }
+    }
+    let Some((_, summary_path)) = newest else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&summary_path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    value
+        .get("key_points")
+        .and_then(serde_json::Value::as_array)
+        .map(|points| {
+            points
+                .iter()
+                .filter_map(|point| point.as_str().map(str::to_string))
+                .filter(|point| !point.trim().is_empty())
+                .take(6)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether a (lowercased) task query names this candidate's path or file name —
@@ -1704,6 +1823,32 @@ mod tests {
             .entries
             .iter()
             .all(|entry| entry.signals.source_quality > 0));
+    }
+
+    #[test]
+    fn recent_session_facts_compete_as_pack_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("README.md"), "parser guide\n").unwrap();
+        run(dir.path(), &config(), RunMode::Full).unwrap();
+
+        // A persisted session summary contributes recent-session candidates.
+        let session_dir = dir.path().join(".localmind").join("sessions").join("s1");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("summary.json"),
+            r#"{"key_points":["remember to update the changelog before release"]}"#,
+        )
+        .unwrap();
+
+        let pack = build_pack(dir.path(), "changelog", 1_000).unwrap();
+        assert!(
+            pack.entries
+                .iter()
+                .any(|entry| entry.source == PackSource::RecentSession
+                    && entry.snippet.contains("changelog")),
+            "recent-session fact missing from {:?}",
+            pack.entries
+        );
     }
 
     #[test]

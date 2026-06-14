@@ -214,24 +214,21 @@ Shipped and tested:
   inclusion/skip reasons.
 - A ranked cross-source budget allocator (accepted memory, recent session,
   ingest, code graph, manual pins) with relevance, source-quality, recency,
-  stale-penalty, and redundancy-penalty signals, each recorded per entry for
-  inspection (see ADR-0015).
+  exact-file-match, confidence, graph-proximity, stale-penalty, and
+  redundancy-penalty signals, each recorded per entry for inspection (ADR-0015).
+- Pack building gathers candidates from ingest hits, accepted-memory anchors,
+  code-graph neighbors of task-relevant symbols, and the most recent session
+  summary's key points, all competing under one budget.
+- The `knowledge pack` command surfaces the active selection: per-source
+  reserves, included entries with rank score and reason, and skipped
+  near-misses with reasons.
 - LocalMind candidates carry evidence and validation status, and memory-update
   suggestions (merge, supersede, split, ignore, promote) are review items, never
   direct writes.
 
 Deliberate gaps (intentionally deferred):
 
-- Exact-file-match, graph-proximity, and confidence ranking signals are not yet
-  computed; the allocator's signal set covers relevance, source quality,
-  recency, stale, and redundancy. The candidate fields reserve room for the
-  rest.
 - The recent-raw-suffix and compaction-digest layers are owned by the
   compaction runtime and compose with the ranked allocator by precedence; they
   are not merged into a single allocator call.
-- Code-graph neighbors and recent-session facts are first-class allocator
-  sources, but their candidate gathering in pack building is deferred to a later
-  wiring pass.
-- A dedicated interactive "inspect active context" command is not yet added;
-  inspection is via the persisted context-pack and compaction-attempt metadata.
 

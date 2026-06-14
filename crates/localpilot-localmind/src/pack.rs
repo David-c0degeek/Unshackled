@@ -106,6 +106,9 @@ pub struct PackCandidate {
     /// Source confidence in `0.0..=1.0` (accepted memory and extraction set
     /// this; lexical sources leave it at the neutral default).
     pub confidence: f32,
+    /// Code-graph distance from a task-relevant symbol (0 = the symbol itself,
+    /// 1 = a direct neighbor). Only meaningful for [`PackSource::CodeGraph`].
+    pub graph_proximity: u32,
 }
 
 /// The components of a candidate's composite rank, kept so a pack is auditable:
@@ -117,6 +120,7 @@ pub struct RankSignals {
     pub recency: i64,
     pub file_match: i64,
     pub confidence: i64,
+    pub graph_proximity: i64,
     pub stale_penalty: i64,
     pub redundancy_penalty: i64,
     pub final_score: i64,
@@ -328,6 +332,8 @@ fn rank_all(candidates: &[PackCandidate]) -> Vec<RankSignals> {
 
 /// Bonus for a task-named file path.
 const FILE_MATCH_BONUS: i64 = 20;
+/// Distance at which a code-graph neighbor stops contributing proximity.
+const GRAPH_PROXIMITY_REACH: i64 = 3;
 
 /// The order-independent part of a candidate's rank.
 fn base_signals(candidate: &PackCandidate) -> RankSignals {
@@ -341,6 +347,11 @@ fn base_signals(candidate: &PackCandidate) -> RankSignals {
     };
     #[allow(clippy::cast_possible_truncation)]
     let confidence = (candidate.confidence.clamp(0.0, 1.0) * 15.0) as i64;
+    let graph_proximity = if candidate.source == PackSource::CodeGraph {
+        (GRAPH_PROXIMITY_REACH - i64::from(candidate.graph_proximity)).max(0) * 3
+    } else {
+        0
+    };
     let stale_penalty = if candidate.stale { -STALE_PENALTY } else { 0 };
     RankSignals {
         relevance,
@@ -348,9 +359,16 @@ fn base_signals(candidate: &PackCandidate) -> RankSignals {
         recency,
         file_match,
         confidence,
+        graph_proximity,
         stale_penalty,
         redundancy_penalty: 0,
-        final_score: relevance + source_quality + recency + file_match + confidence + stale_penalty,
+        final_score: relevance
+            + source_quality
+            + recency
+            + file_match
+            + confidence
+            + graph_proximity
+            + stale_penalty,
     }
 }
 
@@ -380,6 +398,7 @@ mod tests {
             recency: 0,
             file_match: false,
             confidence: 1.0,
+            graph_proximity: 0,
         }
     }
 
@@ -512,6 +531,18 @@ mod tests {
         assert_eq!(out.selected.len(), 1);
         assert_eq!(out.selected[0].id, "named");
         assert_eq!(out.selected[0].signals.file_match, FILE_MATCH_BONUS);
+    }
+
+    #[test]
+    fn a_closer_graph_neighbor_outranks_a_farther_one() {
+        let mut near = candidate(PackSource::CodeGraph, "near", 10, 40);
+        let mut far = candidate(PackSource::CodeGraph, "far", 10, 40);
+        near.graph_proximity = 0; // the symbol itself
+        far.graph_proximity = 3; // distant neighbor: no proximity bonus
+        let out = allocate(vec![far, near], 40);
+        assert_eq!(out.selected.len(), 1);
+        assert_eq!(out.selected[0].id, "near");
+        assert!(out.selected[0].signals.graph_proximity > 0);
     }
 
     #[test]

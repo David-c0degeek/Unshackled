@@ -39,7 +39,9 @@ fn ingest_lifecycle_and_knowledge_commands_work() {
     assert!(search.contains("README.md"));
 
     let pack = run(dir.path(), &["knowledge", "pack", "parser task"]);
-    assert!(pack.contains("chunks:"));
+    assert!(pack.contains("task:"));
+    assert!(pack.contains("budget:"));
+    assert!(pack.contains("included ("));
 
     let review = run(dir.path(), &["ingest", "review"]);
     let id = review

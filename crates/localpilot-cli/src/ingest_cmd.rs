@@ -194,12 +194,57 @@ pub fn knowledge_search(
 pub fn knowledge_pack(project_root: &Path, task: &str, out: &mut dyn Write) -> anyhow::Result<()> {
     let pack = localpilot_localmind::build_pack(project_root, task, 4_000)?;
     writeln!(out, "task: {}", pack.task)?;
-    writeln!(out, "chunks: {}", pack.chunks.len())?;
-    writeln!(out, "estimated tokens: {}", pack.token_estimate)?;
-    for hit in pack.chunks {
-        writeln!(out, "{}:{}-{}", hit.path, hit.start_line, hit.end_line)?;
+    writeln!(
+        out,
+        "budget: {}/{} tokens",
+        pack.token_estimate, pack.token_budget
+    )?;
+    writeln!(
+        out,
+        "reserves: manual-pin n/a  accepted-memory {}  recent-session {}  ingest {}  code-graph {}",
+        pack.accepted_memory_budget,
+        pack.recent_session_budget,
+        pack.ingest_budget,
+        pack.code_graph_budget,
+    )?;
+
+    writeln!(out, "included ({}):", pack.entries.len())?;
+    for entry in &pack.entries {
+        writeln!(
+            out,
+            "  [{}] {} (score {}, {} tok) — {}",
+            pack_source_label(entry.source),
+            entry.path.as_deref().unwrap_or(&entry.id),
+            entry.signals.final_score,
+            entry.token_estimate,
+            entry.reason,
+        )?;
+    }
+
+    if !pack.skipped_entries.is_empty() {
+        writeln!(out, "skipped near-misses ({}):", pack.skipped_entries.len())?;
+        for entry in &pack.skipped_entries {
+            writeln!(
+                out,
+                "  [{}] {} (score {}) — {}",
+                pack_source_label(entry.source),
+                entry.path.as_deref().unwrap_or(&entry.id),
+                entry.signals.final_score,
+                entry.reason,
+            )?;
+        }
     }
     Ok(())
+}
+
+fn pack_source_label(source: localpilot_localmind::PackSource) -> &'static str {
+    match source {
+        localpilot_localmind::PackSource::ManualPin => "pin",
+        localpilot_localmind::PackSource::AcceptedMemory => "memory",
+        localpilot_localmind::PackSource::RecentSession => "session",
+        localpilot_localmind::PackSource::Ingest => "ingest",
+        localpilot_localmind::PackSource::CodeGraph => "graph",
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
