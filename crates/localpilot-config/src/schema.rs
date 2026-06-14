@@ -72,12 +72,28 @@ pub enum CompactionMode {
     SmartWithFallback,
 }
 
+/// How ingested project knowledge reaches the model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestMode {
+    /// Reachable on demand through the `knowledge_search` tool; never seeded into
+    /// the turn context. The lean default.
+    #[default]
+    Pull,
+    /// Legacy behavior: relevant ingest chunks are also auto-seeded into each
+    /// turn's context. Kept as an escape hatch.
+    Push,
+}
+
 /// Project-local folder ingestion configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IngestConfig {
     /// Whether ingest commands are allowed to persist derived project knowledge.
     pub enabled: bool,
+    /// How ingested knowledge reaches the model (pull via tool, or legacy push
+    /// into context).
+    pub mode: IngestMode,
     /// Paths or glob-like fragments explicitly included for ingestion.
     pub include: Vec<String>,
     /// Paths or glob-like fragments explicitly excluded from ingestion.
@@ -103,6 +119,7 @@ impl Default for IngestConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            mode: IngestMode::default(),
             include: Vec::new(),
             exclude: Vec::new(),
             default_skip_dirs: [
@@ -462,6 +479,28 @@ mod tests {
     #[test]
     fn cadence_defaults_to_step() {
         assert_eq!(Cadence::default(), Cadence::Step);
+    }
+
+    #[test]
+    fn ingest_mode_defaults_to_pull() {
+        // Pull is the lean default: ingested knowledge is reached on demand via
+        // the knowledge_search tool, not seeded into every turn.
+        assert_eq!(IngestMode::default(), IngestMode::Pull);
+        assert_eq!(IngestConfig::default().mode, IngestMode::Pull);
+    }
+
+    #[test]
+    fn ingest_mode_round_trips_and_reads_push() {
+        for mode in [IngestMode::Pull, IngestMode::Push] {
+            let value = serde_json::to_value(mode).unwrap();
+            assert_eq!(serde_json::from_value::<IngestMode>(value).unwrap(), mode);
+        }
+        assert_eq!(
+            serde_json::to_value(IngestMode::Pull).unwrap(),
+            json!("pull")
+        );
+        let config: IngestConfig = serde_json::from_value(json!({ "mode": "push" })).unwrap();
+        assert_eq!(config.mode, IngestMode::Push);
     }
 
     #[test]

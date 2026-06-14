@@ -184,8 +184,9 @@ pub async fn run_chat(
         Vec::new(),
     );
     // Relevant accepted LocalMind memory is contributed per turn through the
-    // context-hook fabric.
-    crate::context_inject::register_auto_ingest(&cwd, &mut runtime);
+    // context-hook fabric; ingested folder knowledge is pulled on demand via the
+    // knowledge_search tool rather than seeded here.
+    crate::context_inject::register(&cwd, &mut runtime);
 
     let header = Header {
         version: env!("LOCALPILOT_VERSION").to_string(),

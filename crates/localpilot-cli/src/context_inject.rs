@@ -3,15 +3,22 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use localpilot_config::{CliOverrides, ConfigPaths};
+use localpilot_config::{CliOverrides, ConfigPaths, IngestMode};
 use localpilot_harness::{ContextHook, SessionRuntime};
 
-/// LocalMind retrieval as a pre-turn context hook: relevant accepted project
-/// memory is contributed as system context for the upcoming turn. Best-effort
-/// — a retrieval miss or error contributes nothing and never fails the turn.
+/// Cap on the auto-seeded accepted-memory block, so the always-on context stays
+/// lean regardless of how large the memory store grows.
+const ACCEPTED_MEMORY_CHAR_CAP: usize = 1_200;
+
+/// LocalMind retrieval as a pre-turn context hook. Only accepted, review-gated
+/// project memory is contributed as always-on context (lean, and replaced rather
+/// than accumulated by the harness). Ingested folder knowledge is pulled on
+/// demand through the `knowledge_search` tool instead of being seeded every turn,
+/// unless the project opts back into the legacy push behavior via
+/// `[ingest] mode = "push"`. Best-effort — a miss or error contributes nothing
+/// and never fails the turn.
 pub struct LocalMindContext {
     root: PathBuf,
-    auto_ingest: bool,
 }
 
 impl ContextHook for LocalMindContext {
@@ -22,8 +29,16 @@ impl ContextHook for LocalMindContext {
     fn context_for(&self, prompt: &str) -> Option<String> {
         let accepted = localpilot_localmind::context_for(&self.root, prompt)
             .ok()
-            .flatten();
-        let ingested = self.ingested_context_for(prompt);
+            .flatten()
+            .map(|text| bound(&text, ACCEPTED_MEMORY_CHAR_CAP));
+        let ingested = match self.ingest_config() {
+            Some(config) if config.enabled && config.mode == IngestMode::Push => {
+                localpilot_localmind::ingest_context_for(&self.root, prompt)
+                    .ok()
+                    .flatten()
+            }
+            _ => None,
+        };
         match (accepted, ingested) {
             (Some(accepted), Some(ingested)) => Some(format!("{accepted}\n{ingested}")),
             (Some(accepted), None) => Some(accepted),
@@ -34,25 +49,20 @@ impl ContextHook for LocalMindContext {
 }
 
 impl LocalMindContext {
-    fn ingested_context_for(&self, prompt: &str) -> Option<String> {
-        let config =
-            localpilot_config::load(&ConfigPaths::standard(&self.root), &CliOverrides::default())
-                .ok()?
-                .ingest;
-        if !config.enabled {
-            return None;
-        }
-        if self.auto_ingest && matches!(localpilot_localmind::ingest_status(&self.root), Ok(None)) {
-            let _ = localpilot_localmind::ingest_run(
-                &self.root,
-                &config,
-                localpilot_localmind::RunMode::Full,
-            );
-        }
-        localpilot_localmind::ingest_context_for(&self.root, prompt)
+    fn ingest_config(&self) -> Option<localpilot_config::IngestConfig> {
+        localpilot_config::load(&ConfigPaths::standard(&self.root), &CliOverrides::default())
             .ok()
-            .flatten()
+            .map(|config| config.ingest)
     }
+}
+
+/// Truncate `text` to at most `cap` characters, adding a marker when it was cut.
+fn bound(text: &str, cap: usize) -> String {
+    if text.chars().count() <= cap {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(cap).collect();
+    format!("{truncated}\n… (memory truncated)")
 }
 
 /// Register the LocalMind context hook on a runtime.
@@ -61,21 +71,6 @@ pub fn register(cwd: &Path, runtime: &mut SessionRuntime) {
         .hooks_mut()
         .register_context_hook(Arc::new(LocalMindContext {
             root: cwd.to_path_buf(),
-            auto_ingest: false,
-        }));
-}
-
-/// Register LocalMind retrieval and allow one bounded first-use ingest pass.
-///
-/// This is intended for the trusted interactive REPL path. Non-interactive
-/// modes use [`register`] so a plain prompt never creates project files.
-#[cfg_attr(not(feature = "tui"), allow(dead_code))]
-pub fn register_auto_ingest(cwd: &Path, runtime: &mut SessionRuntime) {
-    runtime
-        .hooks_mut()
-        .register_context_hook(Arc::new(LocalMindContext {
-            root: cwd.to_path_buf(),
-            auto_ingest: true,
         }));
 }
 
