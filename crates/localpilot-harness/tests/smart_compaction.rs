@@ -16,7 +16,7 @@ use localpilot_harness::{
     CompactionMode, FallbackReason, RuntimeEvent, SessionConfig, SessionRuntime, StopReason,
     Summarizer, SummarizerTuning,
 };
-use localpilot_llm::FakeProvider;
+use localpilot_llm::{FakeProvider, ProviderError};
 use localpilot_recovery::{RecoveryBudget, RecoveryEngine};
 use localpilot_sandbox::{Interactivity, PermissionEngine, Profile, ScriptedApprover, Workspace};
 use localpilot_store::Store;
@@ -74,6 +74,50 @@ fn smart_runtime(provider: Arc<FakeProvider>, limit: usize) -> Harness {
         events,
         cancel: CancellationToken::new(),
     }
+}
+
+fn det_runtime(provider: Arc<FakeProvider>, limit: usize) -> Harness {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = SessionRuntime::new(
+        provider,
+        ToolRegistry::with_builtins(),
+        PermissionEngine::new(Profile::Default, Vec::new()),
+        Box::new(ScriptedApprover::always()),
+        Store::open(dir.path()),
+        Workspace::new(dir.path()).unwrap(),
+        RecoveryEngine::new(RecoveryBudget::default()),
+        SessionConfig {
+            interactivity: Interactivity::NonInteractive,
+            context_token_limit: limit,
+            compaction_mode: CompactionMode::Deterministic,
+            ..SessionConfig::default()
+        },
+        Vec::new(),
+    );
+    let (events, _rx) = broadcast::channel(256);
+    Harness {
+        _dir: dir,
+        runtime,
+        events,
+        cancel: CancellationToken::new(),
+    }
+}
+
+fn summary_message_count(provider: &FakeProvider) -> usize {
+    let requests = provider.requests();
+    let Some(last) = requests.last() else {
+        return 0;
+    };
+    last.messages
+        .iter()
+        .filter(|m| {
+            m.role == Role::System
+                && m.content.iter().any(|b| match b {
+                    ContentBlock::Text { text } => text.starts_with(SUMMARY_TITLE),
+                    _ => false,
+                })
+        })
+        .count()
 }
 
 fn smart_summary(marker: &str) -> StructuredSummary {
@@ -305,4 +349,88 @@ async fn media_payloads_never_reach_the_summarizer_or_digest() {
         .summarize(&dropped, &[], SummarizerTuning::default(), &cancel)
         .await;
     assert_eq!(outcome, Err(FallbackReason::Unsupported));
+}
+
+#[tokio::test]
+async fn a_provider_overflow_triggers_one_safe_compaction_retry() {
+    // The first request is rejected as too large (a missed local estimate); the
+    // runtime compacts and retries once, and the retry succeeds.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .script(vec![Err(ProviderError::InvalidRequest {
+                message: "context length exceeded".to_string(),
+            })])
+            .text("recovered after compaction"),
+    );
+    let mut h = det_runtime(Arc::clone(&provider), 4_096);
+    let reason = h
+        .runtime
+        .run_turn("do the thing", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::Done);
+    // Two requests: the overflowing attempt and the successful retry.
+    assert_eq!(provider.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn a_second_provider_overflow_is_terminal() {
+    // Two overflows in one turn: the runtime retries once, then stops.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .script(vec![Err(ProviderError::InvalidRequest {
+                message: "context length exceeded".to_string(),
+            })])
+            .script(vec![Err(ProviderError::InvalidRequest {
+                message: "still too large".to_string(),
+            })]),
+    );
+    let mut h = det_runtime(Arc::clone(&provider), 4_096);
+    let reason = h
+        .runtime
+        .run_turn("do the thing", &h.events, &h.cancel)
+        .await;
+    assert_eq!(reason, StopReason::ProviderError);
+    assert_eq!(provider.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn repeated_compaction_folds_the_previous_summary_once() {
+    // Two compaction rounds: the second digest folds the first instead of
+    // stacking summary messages, and earlier facts survive.
+    let provider = Arc::new(
+        FakeProvider::new()
+            .text("a")
+            .text("b")
+            .text("c")
+            .text("d")
+            .text("e"),
+    );
+    let mut h = det_runtime(Arc::clone(&provider), 700);
+    let filler = "context ".repeat(120);
+
+    for label in ["alpha keep src/keep.rs", "beta"] {
+        let reason = h
+            .runtime
+            .run_turn(&format!("{label} {filler}"), &h.events, &h.cancel)
+            .await;
+        assert_eq!(reason, StopReason::Done);
+    }
+    assert!(h.runtime.compact_conversation().await.compacted);
+
+    for label in ["gamma", "delta"] {
+        let reason = h
+            .runtime
+            .run_turn(&format!("{label} {filler}"), &h.events, &h.cancel)
+            .await;
+        assert_eq!(reason, StopReason::Done);
+    }
+    assert!(h.runtime.compact_conversation().await.compacted);
+
+    let reason = h.runtime.run_turn("after", &h.events, &h.cancel).await;
+    assert_eq!(reason, StopReason::Done);
+
+    // Exactly one summary message survives repeated compaction.
+    assert_eq!(summary_message_count(&provider), 1);
+    // The earliest intent is still carried forward into the folded digest.
+    assert!(last_request_text(&provider).contains("alpha"));
 }

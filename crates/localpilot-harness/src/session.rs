@@ -700,10 +700,56 @@ impl SessionRuntime {
                             self.record_event(SessionEventKind::QuotaPaused { reset });
                         }
                         let _ = events.send(RuntimeEvent::Warning(err.to_string()));
+                        // A context-length rejection at open time is a missed
+                        // local estimate; the turn loop shrinks and retries once.
+                        if let ProviderError::InvalidRequest { .. } = err {
+                            return Err(StreamOpen::Overflow);
+                        }
                         return Err(StreamOpen::Failed);
                     }
                 }
             }
+        }
+    }
+
+    /// Handle a provider overflow: on the first occurrence this turn, compact
+    /// active history tighter and report that a retry will follow (returns
+    /// `true`); on a second overflow it reports a terminal failure (`false`).
+    async fn try_overflow_retry(
+        &mut self,
+        retried: &mut bool,
+        events: &broadcast::Sender<RuntimeEvent>,
+        cancel: &CancellationToken,
+    ) -> bool {
+        if *retried {
+            let _ = events.send(RuntimeEvent::Warning(
+                "provider rejected the request as too large again; stopping the turn".to_string(),
+            ));
+            return false;
+        }
+        *retried = true;
+        let _ = events.send(RuntimeEvent::Warning(
+            "provider rejected the request as too large; compacting and retrying once".to_string(),
+        ));
+        self.shrink_for_overflow(cancel).await;
+        true
+    }
+
+    /// Compact active history to roughly half its current estimate (no smaller
+    /// than the force floor) so a retry fits, recording the attempt as an
+    /// overflow-driven compaction in the audit log.
+    async fn shrink_for_overflow(&mut self, cancel: &CancellationToken) {
+        let target = (estimate_tokens(&self.messages) / 2).max(FORCE_COMPACT_FLOOR);
+        let result = self.compact_candidate(target, cancel).await;
+        if result.compacted {
+            if let Some(summary) = result.summary.clone() {
+                self.record_event(SessionEventKind::Compacted { summary });
+            }
+            self.record_compaction_attempt("overflow_retry", &result.metadata);
+            self.hooks.notify(&HookEvent::Compacted);
+            self.messages = result.messages;
+            self.history_generation += 1;
+            self.compaction_cache = None;
         }
     }
 
@@ -829,6 +875,10 @@ impl SessionRuntime {
         self.last_quota = None;
         self.tool_failure_guard.reset();
         let mut tools_enabled = true;
+        // A provider may reject a request as too large even when the local
+        // estimate believed it fit. The first overflow forces a tighter
+        // compaction and one retry; a second overflow this turn is terminal.
+        let mut overflow_retried = false;
 
         loop {
             if cancel.is_cancelled() {
@@ -869,6 +919,15 @@ impl SessionRuntime {
                 Ok(stream) => stream,
                 Err(StreamOpen::Cancelled) => return self.stop(events, StopReason::Cancelled),
                 Err(StreamOpen::Failed) => return self.stop(events, StopReason::ProviderError),
+                Err(StreamOpen::Overflow) => {
+                    if self
+                        .try_overflow_retry(&mut overflow_retried, events, cancel)
+                        .await
+                    {
+                        continue;
+                    }
+                    return self.stop(events, StopReason::ProviderError);
+                }
             };
 
             let mut text = String::new();
@@ -876,6 +935,7 @@ impl SessionRuntime {
             let mut calls: Vec<(String, String, serde_json::Value)> = Vec::new();
             let mut stream_failed = false;
             let mut output_limited = false;
+            let mut overflow = false;
             // Live degenerate-output guard, fed incrementally so a runaway
             // stream is aborted early without rescanning the whole turn.
             let mut monitor = StreamMonitor::default();
@@ -937,6 +997,13 @@ impl SessionRuntime {
                             }
                             let _ = events
                                 .send(RuntimeEvent::Warning(format!("stream error: {err}")));
+                            // A context-length rejection mid-stream is an
+                            // overflow, not a fatal turn error: shrink and retry
+                            // once before giving up.
+                            if matches!(err, ProviderError::InvalidRequest { .. }) {
+                                overflow = true;
+                                break;
+                            }
                             if stream_error_stops_turn(&err) {
                                 return self.stop(events, StopReason::ProviderError);
                             }
@@ -952,6 +1019,18 @@ impl SessionRuntime {
                         },
                     }
                 }
+            }
+
+            if overflow {
+                // Completed-only: the failed request streamed nothing durable;
+                // shrink active history and retry once, else stop.
+                if self
+                    .try_overflow_retry(&mut overflow_retried, events, cancel)
+                    .await
+                {
+                    continue;
+                }
+                return self.stop(events, StopReason::ProviderError);
             }
 
             if output_limited {
@@ -1330,6 +1409,9 @@ enum StreamOpen {
     Cancelled,
     /// The error was non-transient or retries were exhausted.
     Failed,
+    /// The provider rejected the request as too large (a missed local estimate);
+    /// the turn loop shrinks active history and retries once.
+    Overflow,
 }
 
 /// A short, human-readable description of when a rate-limited request becomes
