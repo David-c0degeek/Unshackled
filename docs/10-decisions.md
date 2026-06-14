@@ -2,6 +2,46 @@
 
 This file starts the decision log. Add new records at the top.
 
+## ADR-0015: Derived Context Sources Compete Under One Ranked Budget
+
+Status: accepted
+
+Derived knowledge that can be injected into a turn — accepted memory anchors,
+recent session facts, ingest hits, code-graph neighbors, and explicit manual
+pins — competes for one token budget instead of each source getting a fixed
+slice. Selection is a deterministic two-phase allocation: a per-source reserve
+phase (filled highest-precedence source first) guarantees a high-value entry
+survives a flood from a noisier source, then a shared pool fills the remainder by
+a composite rank.
+
+The rank is composed from explicit, inspectable signals: raw relevance, a
+source-quality weight (manual pin > accepted memory > recent session > ingest >
+code graph), recency, a stale penalty, and a redundancy penalty that demotes the
+second and later hits from the same file. Every candidate is recorded as either
+selected or skipped with its reason and full signal breakdown.
+
+Consequences:
+
+- A context pack is auditable end to end: a reader can see why each entry was
+  included and why a high-ranking near-miss was dropped.
+- Runtime conversation context (the kept raw suffix and the compaction digest)
+  is owned by the compaction layer (ADR-0014); the ranked budget governs the
+  derived-knowledge layer. The two compose by precedence — system context and
+  the current turn are hard, then the recent suffix and digest, then the ranked
+  derived sources.
+- Manual pins and accepted memory are protected by reserves so a lexical ingest
+  flood cannot crowd out review-gated or user-chosen context.
+
+Reason:
+
+- Fixed per-source slices either waste budget or starve a strong signal; one
+  ranked competition spends the budget where it is most useful while keeping
+  trusted sources protected.
+- OpenCode and Pi informed the layered-precedence and budget concepts; the
+  ranking, signal set, reserve math, and data shapes are original to this
+  repository (clean-room, ADR-0005 / docs/00-clean-room.md). No reference code
+  or prompt text was copied.
+
 ## ADR-0014: Context Projection Is Runtime-Only And Audit-First
 
 Status: accepted

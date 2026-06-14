@@ -656,10 +656,12 @@ pub fn build_pack(
     // budget. Ingest hits come from the task query; accepted-memory anchors are
     // best-effort and only consulted when the project actually has a memory
     // store (so a bare ingest project is untouched).
+    let task_lower = task.to_ascii_lowercase();
     let mut candidates = Vec::new();
     let mut hit_by_id: BTreeMap<String, KnowledgeHit> = BTreeMap::new();
     for hit in search(&root, task)? {
         let chunk = find_chunk(&ingest_dir, &hit.chunk_id)?;
+        let file_match = task_names_path(&task_lower, &hit.path);
         candidates.push(PackCandidate {
             source: PackSource::Ingest,
             id: hit.chunk_id.clone(),
@@ -668,12 +670,16 @@ pub fn build_pack(
             token_estimate: chunk.token_estimate,
             snippet: hit.snippet.clone(),
             stale: hit.stale,
+            recency: 0,
+            file_match,
+            confidence: 0.5,
         });
         hit_by_id.insert(hit.chunk_id.clone(), hit);
     }
     if root.join(".localmind").join("memory").exists() {
         for anchor in crate::ops::search(&root, task).unwrap_or_default() {
             let token_estimate = (anchor.snippet.chars().count() as u64 / 4).max(1);
+            let file_match = task_names_path(&task_lower, &anchor.path);
             candidates.push(PackCandidate {
                 source: PackSource::AcceptedMemory,
                 id: format!("memory:{}", anchor.memory_id),
@@ -682,6 +688,10 @@ pub fn build_pack(
                 token_estimate,
                 snippet: anchor.snippet,
                 stale: false,
+                recency: 0,
+                file_match,
+                // Accepted memory is review-gated, so it carries full confidence.
+                confidence: 1.0,
             });
         }
     }
@@ -751,6 +761,19 @@ pub fn build_pack(
     };
     write_json(&ingest_dir.join(PACK_FILE), &pack)?;
     Ok(pack)
+}
+
+/// Whether a (lowercased) task query names this candidate's path or file name —
+/// an exact-file-match signal that boosts on-topic files in retrieval.
+fn task_names_path(task_lower: &str, path: &str) -> bool {
+    let path_lower = path.to_ascii_lowercase();
+    if path_lower.len() >= 3 && task_lower.contains(&path_lower) {
+        return true;
+    }
+    path_lower
+        .rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name.len() >= 3 && task_lower.contains(name))
 }
 
 /// Format relevant derived ingestion chunks as compact turn context.
@@ -1676,6 +1699,39 @@ mod tests {
         let summed: u64 = pack.entries.iter().map(|entry| entry.token_estimate).sum();
         assert_eq!(pack.token_estimate, summed);
         assert!(pack.token_estimate <= pack.token_budget);
+        // Each entry carries an inspectable rank-signal breakdown.
+        assert!(pack
+            .entries
+            .iter()
+            .all(|entry| entry.signals.source_quality > 0));
+    }
+
+    #[test]
+    fn tight_budget_records_skipped_entries_with_reasons() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), "parser parser one\n").unwrap();
+        fs::write(dir.path().join("b.md"), "parser parser two\n").unwrap();
+        fs::write(dir.path().join("c.md"), "parser parser three\n").unwrap();
+        run(dir.path(), &config(), RunMode::Full).unwrap();
+
+        // A budget too small for every matching chunk forces skips.
+        let pack = build_pack(dir.path(), "parser", 2).unwrap();
+
+        assert!(pack.token_estimate <= 2);
+        // Every recorded candidate — kept or dropped — explains itself.
+        assert!(pack.entries.iter().all(|entry| !entry.reason.is_empty()));
+        assert!(pack
+            .skipped_entries
+            .iter()
+            .all(|entry| !entry.reason.is_empty()));
+        // Something lost the budget competition and says why.
+        assert!(
+            pack.skipped_entries
+                .iter()
+                .any(|entry| entry.reason.contains("budget")),
+            "expected a budget-exhausted skip in {:?}",
+            pack.skipped_entries
+        );
     }
 
     #[test]

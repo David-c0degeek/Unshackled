@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PackSource {
+    /// A context entry the user explicitly pinned; highest precedence.
+    ManualPin,
     /// An accepted, review-gated LocalMind memory.
     AcceptedMemory,
     /// A fact carried from the recent session (compaction digest, etc.).
@@ -40,10 +42,23 @@ impl PackSource {
     /// Fill priority within the reserve phase (lower wins).
     fn priority(self) -> u8 {
         match self {
-            PackSource::AcceptedMemory => 0,
-            PackSource::RecentSession => 1,
-            PackSource::Ingest => 2,
-            PackSource::CodeGraph => 3,
+            PackSource::ManualPin => 0,
+            PackSource::AcceptedMemory => 1,
+            PackSource::RecentSession => 2,
+            PackSource::Ingest => 3,
+            PackSource::CodeGraph => 4,
+        }
+    }
+
+    /// Source-quality weight contributed to a candidate's rank. Trusted,
+    /// review-gated, or user-pinned sources outrank lexical ingest hits.
+    fn quality_weight(self) -> i64 {
+        match self {
+            PackSource::ManualPin => 40,
+            PackSource::AcceptedMemory => 30,
+            PackSource::RecentSession => 20,
+            PackSource::Ingest => 10,
+            PackSource::CodeGraph => 5,
         }
     }
 
@@ -52,16 +67,18 @@ impl PackSource {
     /// competition.
     fn reserve_fraction(self) -> f64 {
         match self {
-            PackSource::AcceptedMemory => 0.25,
+            PackSource::ManualPin => 0.15,
+            PackSource::AcceptedMemory => 0.20,
             PackSource::RecentSession => 0.15,
-            PackSource::Ingest => 0.30,
+            PackSource::Ingest => 0.25,
             PackSource::CodeGraph => 0.10,
         }
     }
 
     /// Every source, for reserve accounting and reporting.
-    pub(crate) fn all() -> [PackSource; 4] {
+    pub(crate) fn all() -> [PackSource; 5] {
         [
+            PackSource::ManualPin,
             PackSource::AcceptedMemory,
             PackSource::RecentSession,
             PackSource::Ingest,
@@ -76,10 +93,33 @@ pub struct PackCandidate {
     pub source: PackSource,
     pub id: String,
     pub path: Option<String>,
+    /// Raw relevance score from the originating search/index.
     pub score: u64,
     pub token_estimate: u64,
     pub snippet: String,
     pub stale: bool,
+    /// Recency rank (higher is more recent). Recent-session and current-turn
+    /// candidates set this; static derived sources leave it zero.
+    pub recency: u64,
+    /// The task explicitly names this candidate's file path.
+    pub file_match: bool,
+    /// Source confidence in `0.0..=1.0` (accepted memory and extraction set
+    /// this; lexical sources leave it at the neutral default).
+    pub confidence: f32,
+}
+
+/// The components of a candidate's composite rank, kept so a pack is auditable:
+/// a reader can see exactly why one entry outranked another.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RankSignals {
+    pub relevance: i64,
+    pub source_quality: i64,
+    pub recency: i64,
+    pub file_match: i64,
+    pub confidence: i64,
+    pub stale_penalty: i64,
+    pub redundancy_penalty: i64,
+    pub final_score: i64,
 }
 
 /// A candidate after allocation, carrying the reason it was kept or skipped.
@@ -95,10 +135,13 @@ pub struct PackEntry {
     pub stale: bool,
     /// Human-readable inclusion or skip reason.
     pub reason: String,
+    /// The rank-signal breakdown that decided this entry's competition.
+    #[serde(default)]
+    pub signals: RankSignals,
 }
 
 impl PackCandidate {
-    fn into_entry(self, reason: String) -> PackEntry {
+    fn into_entry(self, reason: String, signals: RankSignals) -> PackEntry {
         PackEntry {
             source: self.source,
             id: self.id,
@@ -108,6 +151,7 @@ impl PackCandidate {
             snippet: self.snippet,
             stale: self.stale,
             reason,
+            signals,
         }
     }
 
@@ -148,16 +192,28 @@ pub(crate) fn reserves(budget: u64) -> BTreeMap<PackSource, u64> {
         .collect()
 }
 
-/// Compete `candidates` for `budget` tokens. Deterministic: ties break by source
-/// priority then id, so the same inputs always produce the same pack.
-pub(crate) fn allocate(mut candidates: Vec<PackCandidate>, budget: u64) -> Allocation {
-    // Reserve-phase order: source priority, then score desc, then id.
-    candidates.sort_by(|a, b| {
-        a.source
+/// Penalty applied to each repeat of a file path already seen higher in the
+/// ranking, so repeated files/memories collapse toward one useful entry.
+const REDUNDANCY_PENALTY: i64 = 15;
+/// Penalty for a stale (superseded) candidate, so newer evidence wins.
+const STALE_PENALTY: i64 = 25;
+
+/// Compete `candidates` for `budget` tokens. Each candidate is scored from
+/// explicit signals (relevance, source quality, recency, stale and redundancy
+/// penalties), then selected reserve-first and shared-by-rank. Deterministic:
+/// ties break by source priority then id.
+pub(crate) fn allocate(candidates: Vec<PackCandidate>, budget: u64) -> Allocation {
+    let signals = rank_all(&candidates);
+
+    // Indices sorted for the reserve phase: source precedence, then rank, then id.
+    let mut by_reserve: Vec<usize> = (0..candidates.len()).collect();
+    by_reserve.sort_by(|&a, &b| {
+        candidates[a]
+            .source
             .priority()
-            .cmp(&b.source.priority())
-            .then(b.score.cmp(&a.score))
-            .then_with(|| a.id.cmp(&b.id))
+            .cmp(&candidates[b].source.priority())
+            .then(signals[b].final_score.cmp(&signals[a].final_score))
+            .then_with(|| candidates[a].id.cmp(&candidates[b].id))
     });
 
     let reserves = reserves(budget);
@@ -165,18 +221,18 @@ pub(crate) fn allocate(mut candidates: Vec<PackCandidate>, budget: u64) -> Alloc
     let mut used_total = 0_u64;
     let mut used_by_source: BTreeMap<PackSource, u64> = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    let mut selected_ids = BTreeSet::new();
-    let mut duplicate_ids = BTreeSet::new();
+    let mut selected = BTreeSet::new();
+    let mut duplicate = BTreeSet::new();
 
     // Phase 1: reserves. Fill each source up to its guaranteed share.
-    for candidate in &candidates {
-        let key = candidate.dedup_key();
-        if !seen.insert(key) {
-            duplicate_ids.insert(candidate.id.clone());
+    for &idx in &by_reserve {
+        let candidate = &candidates[idx];
+        if !seen.insert(candidate.dedup_key()) {
+            duplicate.insert(idx);
             allocation.skipped.push(
                 candidate
                     .clone()
-                    .into_entry("duplicate content".to_string()),
+                    .into_entry("duplicate content".to_string(), signals[idx]),
             );
             continue;
         }
@@ -186,46 +242,48 @@ pub(crate) fn allocate(mut candidates: Vec<PackCandidate>, budget: u64) -> Alloc
         if src_used.saturating_add(cost) <= reserve && used_total.saturating_add(cost) <= budget {
             used_total = used_total.saturating_add(cost);
             *used_by_source.entry(candidate.source).or_default() += cost;
-            selected_ids.insert(candidate.id.clone());
-            allocation
-                .selected
-                .push(candidate.clone().into_entry(format!(
-                    "included from {} within reserve",
-                    label(candidate.source)
-                )));
+            selected.insert(idx);
+            allocation.selected.push(candidate.clone().into_entry(
+                format!("included from {} within reserve", label(candidate.source)),
+                signals[idx],
+            ));
         }
     }
 
-    // Phase 2: shared pool. Compete leftovers globally by score.
-    let mut leftovers: Vec<&PackCandidate> = candidates
-        .iter()
-        .filter(|candidate| {
-            !selected_ids.contains(&candidate.id) && !duplicate_ids.contains(&candidate.id)
-        })
+    // Phase 2: shared pool. Compete leftovers globally by rank.
+    let mut leftovers: Vec<usize> = (0..candidates.len())
+        .filter(|idx| !selected.contains(idx) && !duplicate.contains(idx))
         .collect();
-    leftovers.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(a.source.priority().cmp(&b.source.priority()))
-            .then_with(|| a.id.cmp(&b.id))
+    leftovers.sort_by(|&a, &b| {
+        signals[b]
+            .final_score
+            .cmp(&signals[a].final_score)
+            .then(
+                candidates[a]
+                    .source
+                    .priority()
+                    .cmp(&candidates[b].source.priority()),
+            )
+            .then_with(|| candidates[a].id.cmp(&candidates[b].id))
     });
-    for candidate in leftovers {
+    for idx in leftovers {
+        let candidate = &candidates[idx];
         let cost = candidate.token_estimate;
         if used_total.saturating_add(cost) <= budget {
             used_total = used_total.saturating_add(cost);
             *used_by_source.entry(candidate.source).or_default() += cost;
-            allocation
-                .selected
-                .push(candidate.clone().into_entry(format!(
+            allocation.selected.push(candidate.clone().into_entry(
+                format!(
                     "included from {} within shared budget",
                     label(candidate.source)
-                )));
+                ),
+                signals[idx],
+            ));
         } else {
-            allocation
-                .skipped
-                .push(candidate.clone().into_entry(format!(
-                    "skipped: budget exhausted ({cost} tokens did not fit)"
-                )));
+            allocation.skipped.push(candidate.clone().into_entry(
+                format!("skipped: budget exhausted ({cost} tokens did not fit)"),
+                signals[idx],
+            ));
         }
     }
 
@@ -234,8 +292,71 @@ pub(crate) fn allocate(mut candidates: Vec<PackCandidate>, budget: u64) -> Alloc
     allocation
 }
 
+/// Score every candidate. Redundancy is counted over a canonical rank order so a
+/// repeated file path is demoted on its second and later appearances.
+fn rank_all(candidates: &[PackCandidate]) -> Vec<RankSignals> {
+    let base: Vec<RankSignals> = candidates.iter().map(base_signals).collect();
+    let mut order: Vec<usize> = (0..candidates.len()).collect();
+    order.sort_by(|&a, &b| {
+        base[b]
+            .final_score
+            .cmp(&base[a].final_score)
+            .then(
+                candidates[a]
+                    .source
+                    .priority()
+                    .cmp(&candidates[b].source.priority()),
+            )
+            .then_with(|| candidates[a].id.cmp(&candidates[b].id))
+    });
+    let mut path_seen: BTreeMap<String, i64> = BTreeMap::new();
+    let mut signals = base;
+    for &idx in &order {
+        let path = candidates[idx].path.clone().unwrap_or_default();
+        let repeats = *path_seen.get(&path).unwrap_or(&0);
+        let penalty = if path.is_empty() {
+            0
+        } else {
+            repeats * REDUNDANCY_PENALTY
+        };
+        path_seen.insert(path, repeats + 1);
+        signals[idx].redundancy_penalty = -penalty;
+        signals[idx].final_score -= penalty;
+    }
+    signals
+}
+
+/// Bonus for a task-named file path.
+const FILE_MATCH_BONUS: i64 = 20;
+
+/// The order-independent part of a candidate's rank.
+fn base_signals(candidate: &PackCandidate) -> RankSignals {
+    let relevance = i64::try_from(candidate.score).unwrap_or(i64::MAX);
+    let source_quality = candidate.source.quality_weight();
+    let recency = i64::try_from(candidate.recency).unwrap_or(i64::MAX).min(50);
+    let file_match = if candidate.file_match {
+        FILE_MATCH_BONUS
+    } else {
+        0
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let confidence = (candidate.confidence.clamp(0.0, 1.0) * 15.0) as i64;
+    let stale_penalty = if candidate.stale { -STALE_PENALTY } else { 0 };
+    RankSignals {
+        relevance,
+        source_quality,
+        recency,
+        file_match,
+        confidence,
+        stale_penalty,
+        redundancy_penalty: 0,
+        final_score: relevance + source_quality + recency + file_match + confidence + stale_penalty,
+    }
+}
+
 fn label(source: PackSource) -> &'static str {
     match source {
+        PackSource::ManualPin => "manual pin",
         PackSource::AcceptedMemory => "accepted memory",
         PackSource::RecentSession => "recent session",
         PackSource::Ingest => "ingest",
@@ -256,6 +377,9 @@ mod tests {
             token_estimate: tokens,
             snippet: format!("snippet {id}"),
             stale: false,
+            recency: 0,
+            file_match: false,
+            confidence: 1.0,
         }
     }
 
@@ -337,5 +461,73 @@ mod tests {
         assert!(out.token_estimate <= 100);
         let summed: u64 = out.selected.iter().map(|e| e.token_estimate).sum();
         assert_eq!(summed, out.token_estimate);
+    }
+
+    #[test]
+    fn accepted_memory_quality_can_outrank_a_higher_raw_ingest_score() {
+        // Tight shared budget for one slot: an accepted memory with a modest raw
+        // score still beats an ingest hit because of its source-quality weight.
+        let memory = candidate(PackSource::AcceptedMemory, "m", 5, 40); // 5 + 30 = 35
+        let ingest = candidate(PackSource::Ingest, "i", 20, 40); // 20 + 10 = 30
+                                                                 // Budget 40 leaves no reserve room (reserves are < 40 each here at 60),
+                                                                 // so they compete in the shared pool by final score.
+        let out = allocate(vec![ingest, memory], 40);
+        assert_eq!(out.selected.len(), 1);
+        assert_eq!(out.selected[0].id, "m");
+        assert!(out.selected[0].signals.source_quality >= 30);
+    }
+
+    #[test]
+    fn a_stale_candidate_loses_to_fresher_evidence() {
+        let mut stale = candidate(PackSource::Ingest, "old", 30, 40);
+        stale.stale = true; // 30 + 10 - 25 = 15
+        let fresh = candidate(PackSource::Ingest, "new", 20, 40); // 20 + 10 = 30
+        let out = allocate(vec![stale, fresh], 40);
+        assert_eq!(out.selected.len(), 1);
+        assert_eq!(out.selected[0].id, "new");
+        let dropped = out.skipped.iter().find(|e| e.id == "old").unwrap();
+        assert_eq!(dropped.signals.stale_penalty, -STALE_PENALTY);
+    }
+
+    #[test]
+    fn repeated_files_are_demoted_by_a_redundancy_penalty() {
+        // Two hits from the same path: the second is penalized so it competes
+        // worse than a distinct-file hit of equal raw score.
+        let mut a = candidate(PackSource::Ingest, "a", 50, 30);
+        let mut b = candidate(PackSource::Ingest, "b", 50, 30);
+        a.path = Some("same.rs".to_string());
+        b.path = Some("same.rs".to_string());
+        let other = candidate(PackSource::Ingest, "c", 45, 30); // distinct file
+        let signals = rank_all(&[a, b, other]);
+        // One of the same-path entries carries a redundancy penalty.
+        assert!(signals.iter().any(|s| s.redundancy_penalty < 0));
+    }
+
+    #[test]
+    fn an_exact_file_match_lifts_an_otherwise_lower_candidate() {
+        let mut named = candidate(PackSource::Ingest, "named", 10, 40); // 10+10+20 = 40
+        named.file_match = true;
+        let other = candidate(PackSource::Ingest, "other", 25, 40); // 25+10 = 35
+        let out = allocate(vec![other, named], 40);
+        assert_eq!(out.selected.len(), 1);
+        assert_eq!(out.selected[0].id, "named");
+        assert_eq!(out.selected[0].signals.file_match, FILE_MATCH_BONUS);
+    }
+
+    #[test]
+    fn manual_pins_take_the_highest_precedence() {
+        // A low-relevance manual pin survives a flood of high-score ingest hits
+        // because its reserve is filled first.
+        let mut candidates = vec![candidate(PackSource::ManualPin, "pin", 1, 20)];
+        for i in 0..50 {
+            candidates.push(candidate(PackSource::Ingest, &format!("i{i}"), 100, 20));
+        }
+        let out = allocate(candidates, 150);
+        assert!(
+            out.selected
+                .iter()
+                .any(|e| e.source == PackSource::ManualPin),
+            "the manual pin must be protected by its reserve"
+        );
     }
 }

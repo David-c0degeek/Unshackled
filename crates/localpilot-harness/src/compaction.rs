@@ -510,6 +510,9 @@ struct DigestBuckets {
     user_intents: BTreeSet<String>,
     command_counts: BTreeMap<String, usize>,
     file_paths: BTreeSet<String>,
+    /// Per-path file operations (read/modified/created/deleted) derived from the
+    /// tool that touched it, so the digest records what happened to each file.
+    file_ops: BTreeMap<String, BTreeSet<String>>,
     failures: BTreeSet<String>,
     stale: BTreeSet<String>,
 }
@@ -536,7 +539,18 @@ fn semantic_digest(dropped: &[Vec<Message>]) -> SemanticDigest {
                             SummarySourceKind::ToolCall,
                             call.id.as_str(),
                         ));
-                        collect_json_paths(&call.input, &mut buckets.file_paths);
+                        let mut call_paths = BTreeSet::new();
+                        collect_json_paths(&call.input, &mut call_paths);
+                        if let Some(op) = classify_file_op(&call.name) {
+                            for path in &call_paths {
+                                buckets
+                                    .file_ops
+                                    .entry(path.clone())
+                                    .or_default()
+                                    .insert(op.to_string());
+                            }
+                        }
+                        buckets.file_paths.extend(call_paths);
                     }
                     ContentBlock::ToolResult(result) => {
                         if result.is_error {
@@ -572,14 +586,25 @@ fn semantic_digest(dropped: &[Vec<Message>]) -> SemanticDigest {
             .or_default()
             .push(item);
     }
-    for path in buckets.file_paths {
+    let file_paths = std::mem::take(&mut buckets.file_paths);
+    let file_ops = std::mem::take(&mut buckets.file_ops);
+    for path in file_paths {
         sources
             .push(SummarySource::new(SummarySourceKind::FilePath, path.clone()).with_path(&path));
+        let label = match file_ops.get(&path) {
+            Some(ops) if !ops.is_empty() => {
+                format!(
+                    "{} {path}",
+                    ops.iter().cloned().collect::<Vec<_>>().join("/")
+                )
+            }
+            _ => path.clone(),
+        };
         buckets
             .sections
             .entry(SummarySectionKind::RelevantFiles)
             .or_default()
-            .push(path);
+            .push(label);
     }
     for failure in buckets.failures {
         buckets
@@ -699,6 +724,29 @@ fn classify_text(role: Role, text: &str, buckets: &mut DigestBuckets) {
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
+}
+
+/// Classify a tool name into the file operation it performs, so the digest can
+/// record read/modified/created/deleted per file. Order matters: delete and
+/// create are checked before the broader write/edit family.
+fn classify_file_op(tool_name: &str) -> Option<&'static str> {
+    let name = tool_name.to_ascii_lowercase();
+    if contains_any(&name, &["delete", "remove", "unlink", "rmdir", "rm_"]) {
+        Some("deleted")
+    } else if contains_any(&name, &["create", "new_file", "touch", "mkdir"]) {
+        Some("created")
+    } else if contains_any(
+        &name,
+        &[
+            "write", "edit", "modify", "replace", "patch", "append", "insert", "apply",
+        ],
+    ) {
+        Some("modified")
+    } else if contains_any(&name, &["read", "cat", "open", "view", "show", "load"]) {
+        Some("read")
+    } else {
+        None
+    }
 }
 
 fn bounded_unique(items: &[String], max: usize) -> Vec<String> {
@@ -1119,6 +1167,45 @@ mod tests {
         let result = compact_with_summary(messages, 200);
         assert!(result.compacted);
         result
+    }
+
+    #[test]
+    fn digest_records_file_operations_by_tool() {
+        let mut messages = vec![Message::text(Role::System, "sys")];
+        for i in 0..6 {
+            messages.push(user(&format!("turn {i} {}", "x".repeat(60))));
+            messages.push(Message::new(
+                Role::Assistant,
+                vec![ContentBlock::ToolUse(ToolCall::new(
+                    ToolUseId::from(format!("w{i}").as_str()),
+                    "write_file",
+                    serde_json::json!({ "path": "src/edited.rs" }),
+                ))],
+            ));
+            messages.push(Message::new(
+                Role::Tool,
+                vec![ContentBlock::ToolResult(ToolResult::success(
+                    ToolUseId::from(format!("w{i}").as_str()),
+                    "ok",
+                ))],
+            ));
+        }
+        let result = compact_with_summary(messages, 120);
+        let digest = result.summary.expect("a digest").render();
+        assert!(
+            digest.contains("modified src/edited.rs"),
+            "digest lacked the file operation: {digest}"
+        );
+    }
+
+    #[test]
+    fn classify_file_op_maps_tool_names() {
+        assert_eq!(classify_file_op("read_file"), Some("read"));
+        assert_eq!(classify_file_op("write_file"), Some("modified"));
+        assert_eq!(classify_file_op("edit_file"), Some("modified"));
+        assert_eq!(classify_file_op("delete_file"), Some("deleted"));
+        assert_eq!(classify_file_op("create_file"), Some("created"));
+        assert_eq!(classify_file_op("run_shell"), None);
     }
 
     #[test]
